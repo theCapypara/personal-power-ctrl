@@ -2,6 +2,7 @@
 name = "personal-power-ctrl"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-3.0-or-later"
 
 [features]
 default = ["sink-hs100", "sink-kodi-rpc-cec", "source-kodi", "source-steamlink"]
