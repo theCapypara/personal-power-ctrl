@@ -1,0 +1,35 @@
+[general]
+power-off-check-interval-sec = 1800
+
+[[sink.hs100]]
+name = "Hi-Fi"
+enable = true
+timeout-sec = 10
+host = "hifi.local:9999"
+
+[[sink.kodi-rpc-cec]]
+name = "LibreElec (CEC)"
+enable = true
+timeout-sec = 10
+on-source-whitelist = ["LibreElec"]
+jsonrpc = "http://libreelec.local:8080/jsonrpc"
+user = "kodi"
+pass = "password"
+
+[[source.kodi]]
+name = "LibreElec"
+enable = true
+timeout-sec = 10
+poll-interval-sec = { off = 1, on = 60 }
+jsonrpc = "http://libreelec.local:8080/jsonrpc"
+user = "kodi"
+pass = "password"
+
+[[source.steamlink]]
+name = "Steam Link"
+enable = true
+timeout-sec = 10
+poll-interval-sec = { off = 10, on = 60 }
+host = "steamlink.local"
+user = "root"
+pass = "password"

@@ -1,0 +1,7 @@
+version: '3'
+services:
+  personal-power-ctrl:
+    image: personal-power-ctrl:latest
+    build: .
+    volumes:
+      - ./config.toml:/app/config.toml:ro

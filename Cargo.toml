@@ -1,0 +1,68 @@
+[package]
+name = "personal-power-ctrl"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["sink-hs100", "sink-kodi-rpc-cec", "source-kodi", "source-steamlink"]
+sink-hs100 = ["hs100api"]
+sink-kodi-rpc-cec = ["kodi-jsonrpc-client", "reqwest", "serde_json"] # https://github.com/joshjowen/script.json-cec
+source-kodi = ["kodi-jsonrpc-client", "reqwest"]
+source-steamlink = ["anyhow", "ssh2", "futures", "bidirectional-channel"]
+
+[dependencies.anyhow]
+optional = true
+version = "1.0"
+
+[dependencies.async-ctrlc]
+version = "1.2"
+
+[dependencies.async-trait]
+version = "0.1"
+
+[dependencies.bidirectional-channel]
+optional = true
+version = "0.3"
+
+[dependencies.config]
+version = "0.13"
+
+[dependencies.futures]
+optional = true
+version = "0.3"
+
+[dependencies.hs100api]
+optional = true
+git = "https://github.com/theCapypara/hs100-rust-api.git"
+branch = "working"
+
+[dependencies.kodi-jsonrpc-client]
+optional = true
+git = "https://github.com/marmeladema/rusty-kodi.git"
+rev = "13be6ca376a26e3f01564f67dee5d134fc47808c"
+
+[dependencies.reqwest]
+optional = true
+version = "0.11"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.serde_json]
+optional = true
+version = "1.0"
+
+[dependencies.ssh2]
+optional = true
+version = "0.9"
+
+[dependencies.tokio]
+version = "1.28"
+features = ["macros"]
+
+[dependencies.tracing]
+version = "0.1"
+
+[dependencies.tracing-subscriber]
+version = "0.3"
