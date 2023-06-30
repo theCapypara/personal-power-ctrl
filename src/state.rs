@@ -21,29 +21,60 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 
 type StateCheckFut<'a> = Fuse<LocalBoxFuture<'a, ()>>;
 
+#[atomic_enum]
+#[derive(PartialEq, Eq, Default)]
+enum PowerState {
+    On,
+    Off,
+    #[default]
+    Unknown,
+}
+
+impl From<bool> for PowerState {
+    fn from(value: bool) -> Self {
+        match value {
+            true => Self::On,
+            false => Self::Off,
+        }
+    }
+}
+
+/// If this fails, the variant was unknown.
+impl TryFrom<PowerState> for bool {
+    type Error = ();
+
+    fn try_from(value: PowerState) -> Result<Self, Self::Error> {
+        match value {
+            PowerState::On => Ok(true),
+            PowerState::Off => Ok(false),
+            PowerState::Unknown => Err(()),
+        }
+    }
+}
+
 struct SourceState {
     source: IsSource,
-    current_power_state: AtomicBool,
+    current_power_state: AtomicPowerState,
 }
 
 impl SourceState {
     fn new(source: Box<dyn Source>) -> Self {
         Self {
             source: IsSource(source),
-            current_power_state: AtomicBool::new(false),
+            current_power_state: AtomicPowerState::new(PowerState::Unknown),
         }
     }
     fn get_sleep_before_check(&self) -> u64 {
         match self.current_power_state.load(Ordering::Acquire) {
-            true => self.source.base_settings().poll_interval_sec.on,
-            false => self.source.base_settings().poll_interval_sec.off,
+            PowerState::On => self.source.base_settings().poll_interval_sec.on,
+            _ => self.source.base_settings().poll_interval_sec.off,
         }
     }
 }
 
 struct SinkState {
     sink: IsSink,
-    current_power_state: AtomicBool,
+    current_power_state: AtomicPowerState,
     should_turn_on: AtomicBool,
 }
 
@@ -51,7 +82,7 @@ impl SinkState {
     fn new(sink: Box<dyn Sink>) -> Self {
         Self {
             sink: IsSink(sink),
-            current_power_state: AtomicBool::new(true),
+            current_power_state: AtomicPowerState::new(PowerState::Unknown),
             should_turn_on: AtomicBool::new(false),
         }
     }
@@ -171,7 +202,7 @@ impl State {
                 let mut all_info_sources = String::new();
                 for (ident, state) in &self.sources {
                     all_info_sources.push_str(&format!(
-                        "{}: {}\n",
+                        "{}: {:?}\n",
                         ident,
                         state.current_power_state.load(Ordering::Acquire)
                     ));
@@ -179,7 +210,7 @@ impl State {
                 let mut all_info_sinks = String::new();
                 for (ident, state) in &*self.sinks {
                     all_info_sinks.push_str(&format!(
-                        "{}: {} -> {}\n",
+                        "{}: {:?} -> {}\n",
                         ident,
                         state.current_power_state.load(Ordering::Acquire),
                         state.should_turn_on.load(Ordering::Acquire)
@@ -188,16 +219,16 @@ impl State {
                 trace!(
                     "# Current info:\n## Sources:\n{all_info_sources}\n## Sinks:\n{all_info_sinks}"
                 );
-
-                trace!("processing sinks...");
             }
+            debug!("processing sinks...");
 
             // Check if all sources are off, if so, turn this one of as well.
             if self
                 .sources
                 .values()
-                .all(|s| !s.current_power_state.load(Ordering::Acquire))
+                .all(|s| s.current_power_state.load(Ordering::Acquire) != PowerState::On)
             {
+                debug!("all off or unknown.");
                 let npwt_mut = next_poweroff_write_time.get_or_insert_with(|| {
                     Instant::now() + Duration::from_secs(self.config.power_off_check_interval_sec)
                 });
@@ -214,31 +245,40 @@ impl State {
                     )
                 } else {
                     for state in self.sinks.values() {
-                        match state.current_power_state.swap(false, Ordering::AcqRel) {
-                            true => {
+                        match state
+                            .current_power_state
+                            .swap(PowerState::Off, Ordering::AcqRel)
+                        {
+                            PowerState::Off => {
+                                #[cfg(debug_assertions)]
+                                trace!("{} Was already turned off.", state.sink.identity())
+                            }
+                            _ => {
                                 info!("{} Turning off...", state.sink.identity());
                                 if !Self::log_sink_error(
                                     &state.sink,
                                     AssertUnwindSafe(state.sink.off()).catch_unwind().await,
                                 ) {
-                                    state.current_power_state.store(true, Ordering::Release);
+                                    state
+                                        .current_power_state
+                                        .store(PowerState::Unknown, Ordering::Release);
                                 }
-                            }
-                            false => {
-                                #[cfg(debug_assertions)]
-                                trace!("{} Was already turned off.", state.sink.identity())
                             }
                         }
                     }
                     (&*manual_wakeup).await;
                 }
             } else {
+                debug!("at least one on.");
                 next_poweroff_write_time = None;
                 for state in self.sinks.values() {
                     // this is not really fully thread safe since the loads and stores are
                     // detached, but it's fine probably?
-                    let condition = state.should_turn_on.load(Ordering::Acquire)
-                        && !state.current_power_state.load(Ordering::Acquire);
+                    let condition = {
+                        state.should_turn_on.load(Ordering::Acquire)
+                            && state.current_power_state.load(Ordering::Acquire) != PowerState::On
+                    };
+                    debug!("{} turn on condition: {}", state.sink.identity(), condition);
                     if condition {
                         info!("{} Turning on...", state.sink.identity());
                         if Self::log_sink_error(
@@ -246,7 +286,9 @@ impl State {
                             AssertUnwindSafe(state.sink.on()).catch_unwind().await,
                         ) {
                             state.should_turn_on.store(false, Ordering::Release);
-                            state.current_power_state.store(true, Ordering::Release);
+                            state
+                                .current_power_state
+                                .store(PowerState::Unknown, Ordering::Release);
                         }
                     } else {
                         #[cfg(debug_assertions)]
@@ -286,8 +328,11 @@ impl State {
         .then(move |result| async move {
             match result {
                 Ok(Ok(Ok(new_state))) => {
-                    let prev_state = state.current_power_state.swap(new_state, Ordering::AcqRel);
-                    if prev_state != new_state {
+                    let prev_state: Result<bool, _> = state
+                        .current_power_state
+                        .swap(new_state.into(), Ordering::AcqRel)
+                        .try_into();
+                    if prev_state != Ok(new_state) {
                         info!("{} New power state: {}", identity, pwrst_log(new_state));
                         Self::update_pending_sink_states(
                             sinks,
@@ -296,6 +341,7 @@ impl State {
                         )
                         .await;
                         if let Some(wakeup) = manual_wakeup.upgrade() {
+                            debug!("waking up sink check");
                             wakeup.wakeup();
                         }
                     }

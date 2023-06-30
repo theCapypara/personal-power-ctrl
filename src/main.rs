@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate async_trait;
+#[macro_use]
+extern crate atomic_enum;
 
 use crate::settings::Settings;
 use crate::sink::create_sinks;
@@ -8,13 +10,13 @@ use crate::state::State;
 use async_ctrlc::CtrlC;
 use tracing::{error, info};
 
+mod async_util;
 mod identity;
 mod log;
 mod settings;
 mod sink;
 mod source;
 mod state;
-mod async_util;
 
 async fn run(config: Settings) {
     let mut state = State::new(config.general);
