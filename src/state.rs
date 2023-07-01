@@ -197,6 +197,7 @@ impl State {
         let mut next_poweroff_write_time: Option<Instant> = None;
 
         loop {
+            let mut wakeup_soon = None;
             #[cfg(debug_assertions)]
             {
                 let mut all_info_sources = String::new();
@@ -239,10 +240,7 @@ impl State {
                         "Pending potential poweroff, but next poweroff write scheduled for in {} sec.",
                         wait_time.as_secs()
                     );
-                    select!(
-                        _ = &*manual_wakeup => {},
-                        _ = sleep(wait_time) => {}
-                    )
+                    wakeup_soon = Some(wait_time);
                 } else {
                     for state in self.sinks.values() {
                         match state
@@ -259,6 +257,7 @@ impl State {
                                     &state.sink,
                                     AssertUnwindSafe(state.sink.off()).catch_unwind().await,
                                 ) {
+                                    wakeup_soon = Some(Duration::from_secs(5));
                                     state
                                         .current_power_state
                                         .store(PowerState::Unknown, Ordering::Release);
@@ -266,7 +265,6 @@ impl State {
                             }
                         }
                     }
-                    (&*manual_wakeup).await;
                 }
             } else {
                 debug!("at least one on.");
@@ -288,6 +286,11 @@ impl State {
                             state.should_turn_on.store(false, Ordering::Release);
                             state
                                 .current_power_state
+                                .store(PowerState::On, Ordering::Release);
+                        } else {
+                            wakeup_soon = Some(Duration::from_secs(5));
+                            state
+                                .current_power_state
                                 .store(PowerState::Unknown, Ordering::Release);
                         }
                     } else {
@@ -298,7 +301,14 @@ impl State {
                         )
                     }
                 }
+            }
 
+            if let Some(wakeup_time) = wakeup_soon {
+                select!(
+                    _ = &*manual_wakeup => {},
+                    _ = sleep(wakeup_time) => {}
+                )
+            } else {
                 (&*manual_wakeup).await;
             }
         }
