@@ -30,6 +30,6 @@ name = "Steam Link"
 enable = true
 timeout-sec = 10
 poll-interval-sec = { off = 10, on = 60 }
-host = "steamlink.local"
+host = "steamlink.local:22"
 user = "root"
 pass = "password"

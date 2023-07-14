@@ -63,7 +63,7 @@ version = "0.9"
 
 [dependencies.tokio]
 version = "1.28"
-features = ["macros"]
+features = ["macros", "rt"]
 
 [dependencies.tracing]
 version = "0.1"

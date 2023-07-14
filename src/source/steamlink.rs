@@ -5,17 +5,18 @@ use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
 use anyhow::anyhow;
 use bidirectional_channel::{bounded, ReceivedRequest, Requester, Responder};
-use futures::executor::block_on;
 use futures::FutureExt;
 use futures::{pin_mut, select};
 use serde::Deserialize;
 use ssh2::{Channel, Session};
 use std::convert::Infallible;
 use std::error::Error;
+use std::io::Read;
 use std::net::TcpStream;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::thread;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use tokio::time::sleep as sleep_async;
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -60,52 +61,51 @@ impl SteamLinkSource {
         settings: Settings,
         responder: Responder<ReceivedRequest<(), Result<bool, anyhow::Error>>>,
     ) {
-        thread::spawn(move || -> ! {
+        tokio::spawn(async move {
             loop {
-                let catch_result = catch_unwind(AssertUnwindSafe(
-                    || -> Result<Infallible, anyhow::Error> {
+                let catch_result: Result<Result<Infallible, anyhow::Error>, _> =
+                    AssertUnwindSafe(async {
                         let sess = Self::make_session(&settings)?;
                         let mut ssh_channel = sess.channel_session()?;
                         let mut keepalive = sess.keepalive_send()?;
                         debug!("Steam Link watcher thread connected.");
                         trace!("Keepalive in {}", keepalive);
 
-                        block_on(async {
-                            debug!("Steam Link watcher thread receiving.");
-                            loop {
-                                // We either send a new keepalive or process the request.
-                                let mut recv_fut = responder.recv().fuse();
-                                let keepalive_wait_fut =
-                                    sleep_async(Duration::from_secs(keepalive as u64)).fuse();
-                                pin_mut!(keepalive_wait_fut);
-                                select! {
-                                    recv_result = recv_fut => {
-                                        // process request
-                                        let req = recv_result?;
-                                        debug!("Steam Link watcher thread received request.");
-                                        let res_active = Self::check_active(&mut ssh_channel);
-                                        debug!("Steam Link watcher thread result: {:?}", res_active);
-                                        match res_active {
-                                            Ok(res) => {
-                                                req.respond(Ok(res)).ok();
-                                            }
-                                            Err(e) => {
-                                                req.respond(Err(e)).ok();
-                                                return Err(anyhow!("Failed reading status."));
-                                            }
+                        debug!("Steam Link watcher thread receiving.");
+                        loop {
+                            // We either send a new keepalive or process the request.
+                            let mut recv_fut = responder.recv().fuse();
+                            let keepalive_wait_fut =
+                                sleep_async(Duration::from_secs(keepalive as u64)).fuse();
+                            pin_mut!(keepalive_wait_fut);
+                            select! {
+                                recv_result = recv_fut => {
+                                    // process request
+                                    let req = recv_result?;
+                                    debug!("Steam Link watcher thread received request.");
+                                    let res_active = Self::check_active(&mut ssh_channel);
+                                    debug!("Steam Link watcher thread result: {:?}", res_active);
+                                    match res_active {
+                                        Ok(res) => {
+                                            req.respond(Ok(res)).ok();
                                         }
-                                        debug!("Steam Link watcher thread receiving.");
+                                        Err(e) => {
+                                            req.respond(Err(e)).ok();
+                                            return Err(anyhow!("Failed reading status."));
+                                        }
                                     }
-                                    _ = keepalive_wait_fut => {
-                                        // keep alive
-                                        keepalive = sess.keepalive_send()?;
-                                        trace!("Keepalive in {}", keepalive);
-                                    }
+                                    debug!("Steam Link watcher thread receiving.");
+                                }
+                                _ = keepalive_wait_fut => {
+                                    // keep alive
+                                    keepalive = sess.keepalive_send()?;
+                                    trace!("Keepalive in {}", keepalive);
                                 }
                             }
-                        })
-                    },
-                ));
+                        }
+                    })
+                    .catch_unwind()
+                    .await;
                 match catch_result {
                     Err(panic) => {
                         error!(
@@ -141,6 +141,8 @@ impl SteamLinkSource {
 
     fn check_active(channel: &mut Channel) -> Result<bool, anyhow::Error> {
         channel.exec("sh -c 'ps | grep streaming_client | grep -v grep'")?;
+        let mut buffer = String::new();
+        channel.read_to_string(&mut buffer)?;
         channel.wait_close()?;
         match channel.exit_status()? {
             0 => Ok(true),
