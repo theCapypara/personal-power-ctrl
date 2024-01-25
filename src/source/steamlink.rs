@@ -1,5 +1,6 @@
 #![cfg(feature = "source-steamlink")]
 
+use std::cmp::max;
 use crate::log::panic_to_string;
 use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
@@ -64,8 +65,7 @@ impl SteamLinkSource {
                 let catch_result: Result<Result<Infallible, anyhow::Error>, _> =
                     AssertUnwindSafe(async {
                         let sess = Self::make_session(&settings)?;
-                        let mut ssh_channel = sess.channel_session()?;
-                        let mut keepalive = sess.keepalive_send()?;
+                        let mut keepalive = max(sess.keepalive_send()?, 1);
                         debug!("Steam Link watcher thread connected.");
                         trace!("Keepalive in {}", keepalive);
 
@@ -81,7 +81,7 @@ impl SteamLinkSource {
                                     // process request
                                     let req = recv_result?;
                                     debug!("Steam Link watcher thread received request.");
-                                    let res_active = Self::check_active(&mut ssh_channel);
+                                    let res_active = Self::check_active(sess.channel_session()?);
                                     debug!("Steam Link watcher thread result: {:?}", res_active);
                                     match res_active {
                                         Ok(res) => {
@@ -96,7 +96,7 @@ impl SteamLinkSource {
                                 }
                                 _ = keepalive_wait_fut => {
                                     // keep alive
-                                    keepalive = sess.keepalive_send()?;
+                                    keepalive = max(sess.keepalive_send()?, 1);
                                     trace!("Keepalive in {}", keepalive);
                                 }
                             }
@@ -137,7 +137,7 @@ impl SteamLinkSource {
         }
     }
 
-    fn check_active(channel: &mut Channel) -> Result<bool, anyhow::Error> {
+    fn check_active(mut channel: Channel) -> Result<bool, anyhow::Error> {
         channel.exec("sh -c 'ps | grep streaming_client | grep -v grep'")?;
         let mut buffer = String::new();
         channel.read_to_string(&mut buffer)?;
