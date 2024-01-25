@@ -13,10 +13,8 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::io::Read;
 use std::net::TcpStream;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::thread;
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
-use tokio::runtime::Handle;
 use tokio::time::sleep as sleep_async;
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -112,11 +110,11 @@ impl SteamLinkSource {
                             "Steam Link watcher thread panicked: {}. Restarting connection in 1 minute.",
                             panic_to_string(panic)
                         );
-                        thread::sleep(Duration::from_secs(60));
+                        tokio::time::sleep(Duration::from_secs(60)).await;
                     }
                     Ok(Err(err)) => {
                         warn!("Steam Link watcher thread encountered an error in the connection: {}. Restarting connection in 1 minute.", err);
-                        thread::sleep(Duration::from_secs(60));
+                        tokio::time::sleep(Duration::from_secs(60)).await;
                     }
                     _ => unreachable!(),
                 };

@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
+use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::select;
 use tokio::time::{sleep, timeout};
@@ -91,7 +91,7 @@ impl SinkState {
 pub struct State {
     config: GeneralSettings,
     sources: HashMap<Identity<'static>, SourceState>,
-    sinks: Arc<HashMap<Identity<'static>, SinkState>>,
+    sinks: Rc<HashMap<Identity<'static>, SinkState>>,
 }
 
 impl State {
@@ -99,7 +99,7 @@ impl State {
         Self {
             config,
             sources: Default::default(),
-            sinks: Arc::new(Default::default()),
+            sinks: Rc::new(Default::default()),
         }
     }
 
@@ -147,7 +147,7 @@ impl State {
                 info!("{} Loaded.", identity_str);
             }
         }
-        self.sinks = Arc::new(new_sinks);
+        self.sinks = Rc::new(new_sinks);
         Ok(())
     }
 
@@ -155,7 +155,7 @@ impl State {
         // On the first run, do not wait before getting source states.
         let mut is_first_run = true;
         let mut source_futs: HashMap<Identity, StateCheckFut> = HashMap::new();
-        let wakeup_sink_check = Arc::new(Wakeup::new(true));
+        let wakeup_sink_check = Rc::new(Wakeup::new(true));
         let mut check_sinks = self
             .check_sinks(wakeup_sink_check.clone())
             .instrument(info_span!("check_sink"))
@@ -169,18 +169,18 @@ impl State {
                 match source_futs.entry(ident.clone()) {
                     Entry::Occupied(mut e) if e.get().is_terminated() => {
                         e.insert(Self::create_source_is_active_fut(
-                            Arc::downgrade(&self.sinks),
+                            Rc::downgrade(&self.sinks),
                             state,
                             is_first_run,
-                            Arc::downgrade(&wakeup_sink_check),
+                            Rc::downgrade(&wakeup_sink_check),
                         ));
                     }
                     Entry::Vacant(e) => {
                         e.insert(Self::create_source_is_active_fut(
-                            Arc::downgrade(&self.sinks),
+                            Rc::downgrade(&self.sinks),
                             state,
                             is_first_run,
-                            Arc::downgrade(&wakeup_sink_check),
+                            Rc::downgrade(&wakeup_sink_check),
                         ));
                     }
                     _ => {}
@@ -193,7 +193,7 @@ impl State {
         }
     }
 
-    async fn check_sinks(&self, manual_wakeup: Arc<Wakeup>) {
+    async fn check_sinks(&self, manual_wakeup: Rc<Wakeup>) {
         let mut next_poweroff_write_time: Option<Instant> = None;
 
         loop {
