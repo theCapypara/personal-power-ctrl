@@ -1,13 +1,11 @@
 #![cfg(feature = "source-steamlink")]
 
-use std::cmp::max;
 use crate::log::panic_to_string;
 use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
 use anyhow::anyhow;
 use bidirectional_channel::{bounded, ReceivedRequest, Requester, Responder};
 use futures::FutureExt;
-use futures::{pin_mut, select};
 use serde::Deserialize;
 use ssh2::{Channel, Session};
 use std::convert::Infallible;
@@ -16,8 +14,7 @@ use std::io::Read;
 use std::net::TcpStream;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
-use tokio::time::sleep as sleep_async;
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, instrument, warn};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Settings {
@@ -64,40 +61,21 @@ impl SteamLinkSource {
             loop {
                 let catch_result: Result<Result<Infallible, anyhow::Error>, _> =
                     AssertUnwindSafe(async {
-                        let sess = Self::make_session(&settings)?;
-                        let mut keepalive = max(sess.keepalive_send()?, 1);
-                        debug!("Steam Link watcher thread connected.");
-                        trace!("Keepalive in {}", keepalive);
-
-                        debug!("Steam Link watcher thread receiving.");
                         loop {
-                            // We either send a new keepalive or process the request.
-                            let mut recv_fut = responder.recv().fuse();
-                            let keepalive_wait_fut =
-                                sleep_async(Duration::from_secs(keepalive as u64)).fuse();
-                            pin_mut!(keepalive_wait_fut);
-                            select! {
-                                recv_result = recv_fut => {
-                                    // process request
-                                    let req = recv_result?;
-                                    debug!("Steam Link watcher thread received request.");
-                                    let res_active = Self::check_active(sess.channel_session()?);
-                                    debug!("Steam Link watcher thread result: {:?}", res_active);
-                                    match res_active {
-                                        Ok(res) => {
-                                            req.respond(Ok(res)).ok();
-                                        }
-                                        Err(e) => {
-                                            req.respond(Err(e)).ok();
-                                            return Err(anyhow!("Failed reading status."));
-                                        }
-                                    }
-                                    debug!("Steam Link watcher thread receiving.");
+                            debug!("Steam Link watcher thread receiving.");
+                            let req = responder.recv().await?;
+                            debug!("Steam Link watcher thread received request.");
+                            let sess = Self::make_session(&settings)?;
+                            debug!("Steam Link watcher thread connected.");
+                            let res_active = Self::check_active(sess.channel_session()?);
+                            debug!("Steam Link watcher thread result: {:?}", res_active);
+                            match res_active {
+                                Ok(res) => {
+                                    req.respond(Ok(res)).ok();
                                 }
-                                _ = keepalive_wait_fut => {
-                                    // keep alive
-                                    keepalive = max(sess.keepalive_send()?, 1);
-                                    trace!("Keepalive in {}", keepalive);
+                                Err(e) => {
+                                    req.respond(Err(e)).ok();
+                                    return Err(anyhow!("Failed reading status."));
                                 }
                             }
                         }
