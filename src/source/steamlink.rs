@@ -16,6 +16,8 @@ use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 use tracing::{debug, error, instrument, warn};
 
+const MAX_CONNECTION_TRIES: usize = 3;
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Settings {
     pub host: String,
@@ -57,26 +59,56 @@ impl SteamLinkSource {
         settings: Settings,
         responder: Responder<ReceivedRequest<(), Result<bool, anyhow::Error>>>,
     ) {
+        let mut opt_set_disabled_after: Option<usize> = None;
+        let wait_timeout = (settings.base.timeout_sec / 2) as u64;
+
         tokio::spawn(async move {
             loop {
-                let catch_result: Result<Result<Infallible, anyhow::Error>, _> =
+                let catch_result: Result<(), _> =
                     AssertUnwindSafe(async {
                         loop {
                             debug!("Steam Link watcher thread receiving.");
-                            let req = responder.recv().await?;
-                            debug!("Steam Link watcher thread received request.");
-                            let sess = Self::make_session(&settings)?;
-                            debug!("Steam Link watcher thread connected.");
-                            let res_active = Self::check_active(sess.channel_session()?);
-                            debug!("Steam Link watcher thread result: {:?}", res_active);
-                            match res_active {
-                                Ok(res) => {
-                                    req.respond(Ok(res)).ok();
+
+                            if let Ok(req) = responder.recv().await {
+                                let res_active: Result<bool, anyhow::Error> = Self::make_session(&settings).map_err(Into::into)
+                                    .and_then(|sess| sess.channel_session().map_err(Into::into))
+                                    .and_then(|chann| Self::check_active(chann).map_err(Into::into));
+
+                                debug!("Steam Link watcher thread result: {:?}", res_active);
+                                match res_active {
+                                    Ok(res) => {
+                                        // If we are active, reset retry counter for connection errors.
+                                        if res {
+                                            opt_set_disabled_after = Some(MAX_CONNECTION_TRIES);
+                                        }
+                                        req.respond(Ok(res)).ok();
+                                    }
+                                    Err(e) => {
+                                        match opt_set_disabled_after {
+                                            None => {
+                                                warn!("Steam Link watcher thread encountered an error in the connection: {}. Restarting attempts in {} seconds.", e, wait_timeout);
+                                                req.respond(Err(e)).ok();
+                                            }
+                                            Some(set_disabled_after) => {
+                                                opt_set_disabled_after = set_disabled_after.checked_sub(1);
+                                                match opt_set_disabled_after {
+                                                    None => {
+                                                        warn!("Steam Link watcher thread continues to fail connecting. Assuming Link went offline.");
+                                                        req.respond(Ok(false)).ok();
+                                                    }
+                                                    Some(set_disabled_after) => {
+                                                        warn!("Steam Link watcher thread encountered an error in the connection: {}. It may be offline now, retrying earliest in {} seconds. Max retries before assuming offline: {}", e, wait_timeout, set_disabled_after);
+                                                        req.respond(Err(e)).ok();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        tokio::time::sleep(Duration::from_secs(wait_timeout)).await;
+                                    }
                                 }
-                                Err(e) => {
-                                    req.respond(Err(e)).ok();
-                                    return Err(anyhow!("Failed reading status."));
-                                }
+                            } else {
+                                error!("Steam Link watcher thread failed reading from responder endpoint. Exiting thread.");
+                                return;
                             }
                         }
                     })
@@ -85,16 +117,16 @@ impl SteamLinkSource {
                 match catch_result {
                     Err(panic) => {
                         error!(
-                            "Steam Link watcher thread panicked: {}. Restarting connection in 1 minute.",
-                            panic_to_string(panic)
+                            "Steam Link watcher thread panicked: {}. Restarting connection in {} seconds.",
+                            panic_to_string(panic), wait_timeout
                         );
-                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        tokio::time::sleep(Duration::from_secs(wait_timeout)).await;
                     }
-                    Ok(Err(err)) => {
-                        warn!("Steam Link watcher thread encountered an error in the connection: {}. Restarting connection in 1 minute.", err);
-                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    Ok(()) => {
+                        panic!(
+                            "Steam Link watcher thread exited because of failed request/responder."
+                        );
                     }
-                    _ => unreachable!(),
                 };
             }
         });
