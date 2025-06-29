@@ -59,7 +59,7 @@ version = "1.0"
 
 [dependencies.ssh2]
 optional = true
-version = "0.9"
+version = "0.9.5"
 
 [dependencies.tokio]
 version = "1.28"
