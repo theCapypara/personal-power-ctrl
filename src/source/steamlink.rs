@@ -148,7 +148,7 @@ impl SteamLinkSource {
     }
 
     fn check_active(mut channel: Channel) -> Result<bool, anyhow::Error> {
-        channel.exec("sh -c 'ps | grep streaming_client | grep -v grep'")?;
+        channel.exec("sh -c 'ps x | grep -e streaming_client -e SteamLaunch | grep -v grep'")?;
         let mut buffer = String::new();
         channel.read_to_string(&mut buffer)?;
         channel.wait_close()?;
