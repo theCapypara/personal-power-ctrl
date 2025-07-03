@@ -1,13 +1,14 @@
 [package]
 name = "personal-power-ctrl"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
 [features]
-default = ["sink-hs100", "sink-kodi-rpc-cec", "source-kodi", "source-steamlink"]
+default = ["sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "source-kodi", "source-steamlink"]
 sink-hs100 = ["hs100api"]
 sink-kodi-rpc-cec = ["kodi-jsonrpc-client", "reqwest", "serde_json"] # https://github.com/joshjowen/script.json-cec
+sink-simple-post-api = ["reqwest"]
 source-kodi = ["kodi-jsonrpc-client", "reqwest"]
 source-steamlink = ["anyhow", "ssh2", "futures", "bidirectional-channel"]
 

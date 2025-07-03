@@ -2,3 +2,4 @@
 config.toml
 .stignore
 .idea
+.envrc

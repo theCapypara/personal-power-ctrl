@@ -223,7 +223,7 @@ impl State {
             }
             debug!("processing sinks...");
 
-            // Check if all sources are off, if so, turn this one of as well.
+            // Check if all sources are off, if so, turn this one off as well.
             if self
                 .sources
                 .values()

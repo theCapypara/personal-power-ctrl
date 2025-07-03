@@ -94,6 +94,9 @@ pub struct MapOfSinkSettings {
     #[cfg(feature = "sink-kodi-rpc-cec")]
     #[serde(default)]
     pub kodi_rpc_cec: Box<[crate::sink::kodi_rpc_cec::Settings]>,
+    #[cfg(feature = "sink-simple-post-api")]
+    #[serde(default)]
+    pub simple_post_api: Box<[crate::sink::simple_post_api::Settings]>,
 }
 
 /// Mapping of all available sources by type.

@@ -28,7 +28,6 @@ async fn run(config: Settings) {
         .expect("Failed to init sources.");
     // This will never complete.
     state.run().await;
-    unreachable!("App loop somehow completed.");
 }
 
 #[tokio::main]
