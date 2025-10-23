@@ -2,7 +2,7 @@ use crate::log::panic_to_string;
 use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
 use anyhow::anyhow;
-use bidirectional_channel::{bounded, ReceivedRequest, Requester, Responder};
+use bidirectional_channel::{ReceivedRequest, Requester, Responder, bounded};
 use futures::FutureExt;
 use serde::Deserialize;
 use ssh2::{Channel, Session};
@@ -115,7 +115,8 @@ impl SteamLinkSource {
                     Err(panic) => {
                         error!(
                             "Steam Link watcher thread panicked: {}. Restarting connection in {} seconds.",
-                            panic_to_string(panic), wait_timeout
+                            panic_to_string(panic),
+                            wait_timeout
                         );
                         tokio::time::sleep(Duration::from_secs(wait_timeout)).await;
                     }

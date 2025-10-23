@@ -4,11 +4,11 @@ use crate::log::{panic_to_string, pwrst_log};
 use crate::settings::GeneralSettings;
 use crate::sink::Sink;
 use crate::source::Source;
-use futures::future::{select_all, Fuse, FusedFuture, LocalBoxFuture};
 use futures::FutureExt;
+use futures::future::{Fuse, FusedFuture, LocalBoxFuture, select_all};
 use std::any::Any;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::error::Error;
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::select;
 use tokio::time::{sleep, timeout};
-use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 type StateCheckFut<'a> = Fuse<LocalBoxFuture<'a, ()>>;
 
@@ -118,7 +118,10 @@ impl State {
                 )
                 .is_some();
             if existed {
-                warn!("{} A source with this name already existed, the previously loaded source with the same name was removed.", identity_str);
+                warn!(
+                    "{} A source with this name already existed, the previously loaded source with the same name was removed.",
+                    identity_str
+                );
             } else {
                 info!("{} Loaded.", identity_str);
             }
@@ -142,7 +145,10 @@ impl State {
                 )
                 .is_some();
             if existed {
-                warn!("{} A sink with this name already existed, the previously loaded sink with the same name was removed.", identity_str);
+                warn!(
+                    "{} A sink with this name already existed, the previously loaded sink with the same name was removed.",
+                    identity_str
+                );
             } else {
                 info!("{} Loaded.", identity_str);
             }

@@ -1,7 +1,7 @@
 use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
-use kodi_jsonrpc_client::methods::PlayerGetActivePlayers;
 use kodi_jsonrpc_client::KodiClient;
+use kodi_jsonrpc_client::methods::PlayerGetActivePlayers;
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::error::Error;

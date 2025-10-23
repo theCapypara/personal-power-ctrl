@@ -1,12 +1,12 @@
 use std::any::Any;
 use std::env;
 use std::error::Error;
-use std::io::{stdout, IsTerminal};
+use std::io::{IsTerminal, stdout};
 use std::str::FromStr;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, Layer};
+use tracing_subscriber::{Layer, fmt};
 
 #[must_use = "this may hold resources used for logging purposes until dropped."]
 pub struct LogHandle(());

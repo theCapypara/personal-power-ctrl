@@ -1,6 +1,6 @@
 use crate::settings::{SinkBaseSettings, SinkSettings};
-use crate::sink::kodi_rpc_cec::kodi_cmd::{AddonsExecute, CecCommand};
 use crate::sink::Sink;
+use crate::sink::kodi_rpc_cec::kodi_cmd::{AddonsExecute, CecCommand};
 use kodi_jsonrpc_client::KodiClient;
 use serde::Deserialize;
 use std::convert::Infallible;
