@@ -1,5 +1,3 @@
-#![cfg(feature = "sink-kodi-rpc-cec")]
-
 use crate::settings::{SinkBaseSettings, SinkSettings};
 use crate::sink::kodi_rpc_cec::kodi_cmd::{AddonsExecute, CecCommand};
 use crate::sink::Sink;

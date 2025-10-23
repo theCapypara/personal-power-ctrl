@@ -1,5 +1,3 @@
-#![cfg(feature = "sink-simple-post-api")]
-
 use crate::settings::{SinkBaseSettings, SinkSettings};
 use crate::sink::Sink;
 use serde::Deserialize;

@@ -52,9 +52,8 @@ where
             info!("{} Initializing...", cfg.base().identity());
             cfg.create_sink()
                 .map(|x| Box::new(x) as Box<dyn Sink>)
-                .map_err(|e| {
-                    error!("{} Failed creating sink: {}", cfg.base().identity(), &e);
-                    e
+                .inspect_err(|e| {
+                    error!("{} Failed creating sink: {}", cfg.base().identity(), e);
                 })
         })
 }

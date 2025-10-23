@@ -48,9 +48,8 @@ where
             info!("{} Initializing...", cfg.base().identity());
             cfg.create_source()
                 .map(|x| Box::new(x) as Box<dyn Source>)
-                .map_err(|e| {
-                    error!("{} Failed creating source: {}", cfg.base().identity(), &e);
-                    e
+                .inspect_err(|e| {
+                    error!("{} Failed creating source: {}", cfg.base().identity(), e);
                 })
         })
 }

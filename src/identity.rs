@@ -53,7 +53,7 @@ impl<'a> Identity<'a> {
 pub trait Named {
     fn category(&self) -> &'static str;
     fn name(&self) -> &str;
-    fn identity(&self) -> Identity {
+    fn identity(&self) -> Identity<'_> {
         Identity {
             category: self.category(),
             name: Cow::Borrowed(self.name()),

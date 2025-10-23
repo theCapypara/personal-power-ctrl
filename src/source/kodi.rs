@@ -1,5 +1,3 @@
-#![cfg(feature = "source-kodi")]
-
 use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
 use kodi_jsonrpc_client::methods::PlayerGetActivePlayers;

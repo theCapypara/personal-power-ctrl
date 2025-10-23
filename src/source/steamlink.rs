@@ -1,5 +1,3 @@
-#![cfg(feature = "source-steamlink")]
-
 use crate::log::panic_to_string;
 use crate::settings::{SourceBaseSettings, SourceSettings};
 use crate::source::{Source, SourceIsActiveResult};
@@ -70,9 +68,8 @@ impl SteamLinkSource {
                             debug!("Steam Link watcher thread receiving.");
 
                             if let Ok(req) = responder.recv().await {
-                                let res_active: Result<bool, anyhow::Error> = Self::make_session(&settings).map_err(Into::into)
-                                    .and_then(|sess| sess.channel_session().map_err(Into::into))
-                                    .and_then(|chann| Self::check_active(chann).map_err(Into::into));
+                                let res_active: Result<bool, anyhow::Error> = Self::make_session(&settings).and_then(|sess| sess.channel_session().map_err(Into::into))
+                                    .and_then(Self::check_active);
 
                                 debug!("Steam Link watcher thread result: {:?}", res_active);
                                 match res_active {
