@@ -2012,6 +2012,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d79f344d606dd726241915966c4682e705a006a095ff853bba74b8f4ee24fe1f"
 dependencies = [
  "asn1-rs",
+ "tokio",
 ]
 
 [[package]]

@@ -97,6 +97,9 @@ pub struct MapOfSinkSettings {
     #[cfg(feature = "sink-simple-post-api")]
     #[serde(default)]
     pub simple_post_api: Box<[crate::sink::simple_post_api::Settings]>,
+    #[cfg(feature = "sink-snmp")]
+    #[serde(default)]
+    pub snmpv2: Box<[crate::sink::snmpv2::Settings]>,
 }
 
 /// Mapping of all available sources by type.

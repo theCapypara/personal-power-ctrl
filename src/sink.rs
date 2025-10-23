@@ -11,6 +11,8 @@ pub mod hs100;
 pub mod kodi_rpc_cec;
 #[cfg(feature = "sink-simple-post-api")]
 pub mod simple_post_api;
+#[cfg(feature = "sink-snmp")]
+pub mod snmpv2;
 
 #[async_trait]
 /// A device which power state should be controlled based on whether sources are active or not.
@@ -34,6 +36,8 @@ pub async fn create_sinks(
     let all = all.chain(create_of_type(&sink_config.kodi_rpc_cec));
     #[cfg(feature = "sink-simple-post-api")]
     let all = all.chain(create_of_type(&sink_config.simple_post_api));
+    #[cfg(feature = "sink-snmp")]
+    let all = all.chain(create_of_type(&sink_config.snmpv2));
 
     state.try_register_sinks(all).await
 }
