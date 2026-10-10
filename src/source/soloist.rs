@@ -68,6 +68,7 @@ impl SoloistSource {
             if let Message::Text(text) = msg {
                 let msg = serde_json::from_str::<SoloistMessage>(&text)
                     .with_context(|| format!("error parsing Soloist JSON. raw: {}", text))?;
+                debug!("got a message from Soloist: {:?}", msg);
                 match msg {
                     SoloistMessage::AuthStateMessage { is_active, .. }
                     | SoloistMessage::DeviceChanged { is_active, .. } => tx.send(Ok(is_active))?,
