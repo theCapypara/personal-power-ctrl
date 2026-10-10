@@ -1,25 +1,24 @@
+#![allow(clippy::arc_with_non_send_sync)]
+
 use crate::async_util::Wakeup;
 use crate::identity::{Identity, IsSink, IsSource, Named};
 use crate::log::{panic_to_string, pwrst_log};
 use crate::settings::GeneralSettings;
 use crate::sink::Sink;
-use crate::source::Source;
+use crate::source::{Source, SourcePowerStateResult};
 use futures::FutureExt;
-use futures::future::{Fuse, FusedFuture, LocalBoxFuture, select_all};
 use std::any::Any;
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::error::Error;
-use std::iter::once;
 use std::panic::AssertUnwindSafe;
-use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::select;
-use tokio::time::{sleep, timeout};
-use tracing::{Instrument, debug, error, info, info_span, trace, warn};
-
-type StateCheckFut<'a> = Fuse<LocalBoxFuture<'a, ()>>;
+use tokio::time::sleep;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::WatchStream;
+use tracing::{Instrument, debug, error, info, info_span, instrument, trace, warn};
 
 #[atomic_enum]
 #[derive(PartialEq, Eq, Default)]
@@ -58,16 +57,10 @@ struct SourceState {
 }
 
 impl SourceState {
-    fn new(source: Box<dyn Source>) -> Self {
+    fn new(source: Arc<dyn Source>) -> Self {
         Self {
             source: IsSource(source),
             current_power_state: AtomicPowerState::new(PowerState::Unknown),
-        }
-    }
-    fn get_sleep_before_check(&self) -> u64 {
-        match self.current_power_state.load(Ordering::Acquire) {
-            PowerState::On => self.source.base_settings().poll_interval_sec.on,
-            _ => self.source.base_settings().poll_interval_sec.off,
         }
     }
 }
@@ -79,7 +72,7 @@ struct SinkState {
 }
 
 impl SinkState {
-    fn new(sink: Box<dyn Sink>) -> Self {
+    fn new(sink: Arc<dyn Sink>) -> Self {
         Self {
             sink: IsSink(sink),
             current_power_state: AtomicPowerState::new(PowerState::Unknown),
@@ -91,7 +84,7 @@ impl SinkState {
 pub struct State {
     config: GeneralSettings,
     sources: HashMap<Identity<'static>, SourceState>,
-    sinks: Rc<HashMap<Identity<'static>, SinkState>>,
+    sinks: Arc<HashMap<Identity<'static>, SinkState>>,
 }
 
 impl State {
@@ -99,13 +92,13 @@ impl State {
         Self {
             config,
             sources: Default::default(),
-            sinks: Rc::new(Default::default()),
+            sinks: Arc::new(Default::default()),
         }
     }
 
     pub async fn try_register_sources(
         &mut self,
-        sources: impl Iterator<Item = Result<Box<dyn Source>, Box<dyn Error>>>,
+        sources: impl Iterator<Item = Result<Arc<dyn Source>, Box<dyn Error>>>,
     ) -> Result<(), Box<dyn Error>> {
         let mut new_sources = HashMap::new();
         for maybe_source in sources {
@@ -132,7 +125,7 @@ impl State {
 
     pub async fn try_register_sinks(
         &mut self,
-        sinks: impl Iterator<Item = Result<Box<dyn Sink>, Box<dyn Error>>>,
+        sinks: impl Iterator<Item = Result<Arc<dyn Sink>, Box<dyn Error>>>,
     ) -> Result<(), Box<dyn Error>> {
         let mut new_sinks = HashMap::new();
         for maybe_sink in sinks {
@@ -153,53 +146,44 @@ impl State {
                 info!("{} Loaded.", identity_str);
             }
         }
-        self.sinks = Rc::new(new_sinks);
+        self.sinks = Arc::new(new_sinks);
         Ok(())
     }
 
     pub async fn run(&self) -> ! {
-        // On the first run, do not wait before getting source states.
-        let mut is_first_run = true;
-        let mut source_futs: HashMap<Identity, StateCheckFut> = HashMap::new();
-        let wakeup_sink_check = Rc::new(Wakeup::new(true));
+        let wakeup_sink_check = Arc::new(Wakeup::new(true));
         let mut check_sinks = self
             .check_sinks(wakeup_sink_check.clone())
             .instrument(info_span!("check_sink"))
             .boxed_local()
             .fuse();
 
-        loop {
-            // Set up futures for checking active.
-            for (ident, state) in &self.sources {
-                #[allow(unused_must_use)] // the future is terminated so it has already been used.
-                match source_futs.entry(ident.clone()) {
-                    Entry::Occupied(mut e) if e.get().is_terminated() => {
-                        e.insert(Self::create_source_is_active_fut(
-                            Rc::downgrade(&self.sinks),
-                            state,
-                            is_first_run,
-                            Rc::downgrade(&wakeup_sink_check),
-                        ));
-                    }
-                    Entry::Vacant(e) => {
-                        e.insert(Self::create_source_is_active_fut(
-                            Rc::downgrade(&self.sinks),
-                            state,
-                            is_first_run,
-                            Rc::downgrade(&wakeup_sink_check),
-                        ));
-                    }
-                    _ => {}
-                };
-            }
+        let mut source_channels = self
+            .sources
+            .iter()
+            .map(|(identity, source_state)| {
+                let identity = identity.clone();
+                WatchStream::new(source_state.source.0.clone().create_channel())
+                    .map(move |res| (identity.clone(), res))
+            })
+            .collect::<Vec<_>>();
 
+        loop {
             // Select any of the source scan or sink set futures.
-            select_all(once(&mut check_sinks).chain(source_futs.values_mut())).await;
-            is_first_run = false;
+            let mut source_watchers = futures::stream::select_all(source_channels.iter_mut());
+
+            select!(_ = &mut check_sinks => {}, strm_res = source_watchers.next() => {
+                match strm_res {
+                    None => {
+                        panic!("source watcher stream ended unexpectedly. Can not continue.");
+                    }
+                    Some((identity, new_state)) => self.handle_source_state_change(&wakeup_sink_check, identity, new_state).await
+                }
+            });
         }
     }
 
-    async fn check_sinks(&self, manual_wakeup: Rc<Wakeup>) {
+    async fn check_sinks(&self, manual_wakeup: Arc<Wakeup>) {
         let mut next_poweroff_write_time: Option<Instant> = None;
 
         loop {
@@ -320,91 +304,50 @@ impl State {
         }
     }
 
-    fn create_source_is_active_fut<'a>(
-        sinks: Weak<HashMap<Identity<'a>, SinkState>>,
-        state: &'a SourceState,
-        is_first_run: bool,
-        manual_wakeup: Weak<Wakeup>,
-    ) -> StateCheckFut<'a> {
-        let identity = state.source.identity();
-        trace!("{} setting up future", state.source.identity());
-
-        // First sleep until the next scan interval, then check, but with a timeout.
-        sleep(Duration::from_secs(if is_first_run {
-            0
-        } else {
-            state.get_sleep_before_check()
-        }))
-        .then(|_| {
-            timeout(
-                Duration::from_secs(state.source.base_settings().timeout_sec as u64),
-                AssertUnwindSafe(state.source.is_active()).catch_unwind(),
-            )
-        })
-        .then(move |result| async move {
-            match result {
-                Ok(Ok(Ok(new_state))) => {
-                    let prev_state: Result<bool, _> = state
-                        .current_power_state
-                        .swap(new_state.into(), Ordering::AcqRel)
-                        .try_into();
-                    if prev_state != Ok(new_state) {
-                        info!("{} New power state: {}", identity, pwrst_log(new_state));
-                        Self::update_pending_sink_states(
-                            sinks,
-                            &state.source.base_settings().name,
-                            new_state,
-                        )
+    #[instrument("check_source_update", skip(self, manual_wakeup))]
+    async fn handle_source_state_change(
+        &self,
+        manual_wakeup: &Wakeup,
+        identity: Identity<'_>,
+        result: SourcePowerStateResult,
+    ) {
+        info!("source state change event: {identity}: {result:?}");
+        let state = self.sources.get(&identity).unwrap();
+        match &result {
+            Ok(new_state) => {
+                let new_state = *new_state;
+                let prev_state: Result<bool, _> = state
+                    .current_power_state
+                    .swap(new_state.into(), Ordering::AcqRel)
+                    .try_into();
+                if prev_state != Ok(new_state) {
+                    info!("{} New power state: {}", identity, pwrst_log(new_state));
+                    self.update_pending_sink_states(&state.source.base_settings().name, new_state)
                         .await;
-                        if let Some(wakeup) = manual_wakeup.upgrade() {
-                            debug!("waking up sink check");
-                            wakeup.wakeup();
-                        }
-                    }
+                    debug!("waking up sink check");
+                    manual_wakeup.wakeup();
                 }
-                Ok(Err(e)) => error!(
-                    "{} Panic while getting power state: {}",
-                    identity,
-                    panic_to_string(e)
-                ),
-                Ok(Ok(Err(e))) => error!("{} Error while getting power state: {}", identity, e),
-                Err(_) => error!("{} Timeout while scanning for power state.", identity),
             }
-        })
-        .instrument(info_span!(
-            "check_source",
-            source = state.source.base_settings().name()
-        ))
-        .boxed_local()
-        .fuse()
+            Err(e) => error!("{} Error while getting power state: {}", identity, e.0),
+        }
     }
 
-    async fn update_pending_sink_states(
-        sinks: Weak<HashMap<Identity<'_>, SinkState>>,
-        source_name: &str,
-        state: bool,
-    ) {
-        let maybe_fut = sinks.upgrade().map(|sinks| async move {
-            for sink_state in sinks.values() {
-                if sink_state
-                    .sink
-                    .base_settings()
-                    .allows_source_for_on(source_name)
-                {
-                    if state {
-                        sink_state.should_turn_on.store(true, Ordering::Release);
-                    }
-                    debug!(
-                        "{} Marked for new pending power state: {}.",
-                        sink_state.sink.identity(),
-                        pwrst_log(state)
-                    );
+    async fn update_pending_sink_states(&self, source_name: &str, state: bool) {
+        for sink_state in self.sinks.values() {
+            if sink_state
+                .sink
+                .base_settings()
+                .allows_source_for_on(source_name)
+            {
+                if state {
+                    sink_state.should_turn_on.store(true, Ordering::Release);
                 }
+                debug!(
+                    "{} Marked for new pending power state: {}.",
+                    sink_state.sink.identity(),
+                    pwrst_log(state)
+                );
             }
-        });
-        match maybe_fut {
-            None => {}
-            Some(fut) => fut.await,
         }
     }
 

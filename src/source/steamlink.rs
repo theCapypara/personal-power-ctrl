@@ -1,6 +1,6 @@
 use crate::log::panic_to_string;
-use crate::settings::{SourceBaseSettings, SourceSettings};
-use crate::source::{Source, SourceIsActiveResult};
+use crate::settings::{PollInterval, SourceBaseSettings, SourceSettings};
+use crate::source::{PollConfiguration, Source, SourcePowerStateResult};
 use anyhow::anyhow;
 use bidirectional_channel::{ReceivedRequest, Requester, Responder, bounded};
 use futures::FutureExt;
@@ -11,16 +11,23 @@ use std::error::Error;
 use std::io::Read;
 use std::net::TcpStream;
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch::Receiver;
 use tracing::{debug, error, instrument, warn};
 
 const MAX_CONNECTION_TRIES: usize = 3;
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Settings {
     pub host: String,
     pub user: String,
     pub pass: String,
+    /// The intervals to poll for state changes.
+    pub poll_interval_sec: PollInterval,
+    /// Timeout in seconds.
+    pub timeout_sec: u64,
     #[serde(flatten)]
     base: SourceBaseSettings,
 }
@@ -58,7 +65,7 @@ impl SteamLinkSource {
         responder: Responder<ReceivedRequest<(), Result<bool, anyhow::Error>>>,
     ) {
         let mut opt_set_disabled_after: Option<usize> = None;
-        let wait_timeout = (settings.base.timeout_sec / 2) as u64;
+        let wait_timeout = settings.timeout_sec / 2;
 
         tokio::spawn(async move {
             loop {
@@ -164,7 +171,13 @@ impl Source for SteamLinkSource {
         self.settings.base()
     }
 
-    async fn is_active(&self) -> SourceIsActiveResult {
-        self.requester.send(()).await?.map_err(Into::into)
+    fn create_channel(self: Arc<Self>) -> Receiver<SourcePowerStateResult> {
+        let poll_config = PollConfiguration {
+            interval: self.settings.poll_interval_sec,
+            timeout: self.settings.timeout_sec,
+        };
+        self.poll_loop(poll_config, |slf| {
+            Box::pin(async move { slf.requester.send(()).await?.map_err(Into::into) })
+        })
     }
 }

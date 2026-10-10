@@ -4,10 +4,11 @@ use crate::source::Source;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
+use std::sync::Arc;
 
 #[repr(transparent)]
 /// Transparent newtype wrapper for a type that is only a Sink, not a source.
-pub struct IsSink(pub Box<dyn Sink>);
+pub struct IsSink(pub Arc<dyn Sink>);
 impl Deref for IsSink {
     type Target = dyn Sink;
 
@@ -18,7 +19,7 @@ impl Deref for IsSink {
 
 #[repr(transparent)]
 /// Transparent newtype wrapper for a type that is only a Source, not a sink.
-pub struct IsSource(pub Box<dyn Source>);
+pub struct IsSource(pub Arc<dyn Source>);
 impl Deref for IsSource {
     type Target = dyn Source;
 
@@ -58,6 +59,18 @@ pub trait Named {
             category: self.category(),
             name: Cow::Borrowed(self.name()),
         }
+    }
+}
+
+impl<'a> Named for Identity<'a> {
+    fn category(&self) -> &'static str {
+        self.category
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn identity(&self) -> Identity<'a> {
+        self.clone()
     }
 }
 

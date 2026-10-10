@@ -1,17 +1,18 @@
 [package]
 name = "personal-power-ctrl"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
 [features]
-default = ["sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "sink-snmp", "source-kodi", "source-steamlink"]
-sink-hs100 = ["hs100api"]
-sink-kodi-rpc-cec = ["kodi-jsonrpc-client", "reqwest", "serde_json"] # https://github.com/joshjowen/script.json-cec
-sink-simple-post-api = ["reqwest"]
-sink-snmp = ["snmp2"]
-source-kodi = ["kodi-jsonrpc-client", "reqwest"]
-source-steamlink = ["anyhow", "ssh2", "futures", "bidirectional-channel"]
+default = ["sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "sink-snmp", "source-kodi", "source-steamlink", "source-soloist"]
+sink-hs100 = ["dep:hs100api"]
+sink-kodi-rpc-cec = ["dep:kodi-jsonrpc-client", "dep:reqwest", "dep:serde_json"] # https://github.com/joshjowen/script.json-cec
+sink-simple-post-api = ["dep:reqwest"]
+sink-snmp = ["dep:snmp2"]
+source-kodi = ["dep:kodi-jsonrpc-client", "dep:reqwest"]
+source-steamlink = ["dep:anyhow", "dep:ssh2", "dep:futures", "dep:bidirectional-channel"]
+source-soloist = ["dep:tokio-tungstenite", "dep:serde_json"]
 
 [dependencies.anyhow]
 optional = true
@@ -53,7 +54,7 @@ version = "0.11"
 
 [dependencies.snmp2]
 optional = true
-version = "0.4"
+version = "0.5"
 features = ["tokio"]
 
 [dependencies.serde]
@@ -72,8 +73,16 @@ version = "0.9"
 version = "1.53"
 features = ["macros", "rt"]
 
+[dependencies.tokio-stream]
+version = "0.1"
+features = ["sync"]
+
 [dependencies.tracing]
 version = "0.1"
 
 [dependencies.tracing-subscriber]
 version = "0.3"
+
+[dependencies.tokio-tungstenite]
+optional = true
+version = "0.30"

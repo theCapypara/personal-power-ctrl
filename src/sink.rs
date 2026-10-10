@@ -3,6 +3,7 @@ use crate::settings::{MapOfSinkSettings, SinkBaseSettings, SinkSettings};
 use crate::state::State;
 use std::error::Error;
 use std::iter::empty;
+use std::sync::Arc;
 use tracing::{error, info};
 
 #[cfg(feature = "sink-hs100")]
@@ -44,7 +45,7 @@ pub async fn create_sinks(
 
 fn create_of_type<'a, S>(
     sink_configs: &'a [S],
-) -> impl Iterator<Item = Result<Box<dyn Sink>, Box<dyn Error>>> + 'a
+) -> impl Iterator<Item = Result<Arc<dyn Sink>, Box<dyn Error>>> + 'a
 where
     S: SinkSettings + 'a,
     S::Impl: 'static,
@@ -55,7 +56,7 @@ where
         .map(|cfg| {
             info!("{} Initializing...", cfg.base().identity());
             cfg.create_sink()
-                .map(|x| Box::new(x) as Box<dyn Sink>)
+                .map(|x| Arc::new(x) as Arc<dyn Sink>)
                 .inspect_err(|e| {
                     error!("{} Failed creating sink: {}", cfg.base().identity(), e);
                 })

@@ -15,7 +15,7 @@ pub struct GeneralSettings {
 }
 
 /// Interval to poll for source status updates.
-#[derive(Clone, PartialEq, Debug, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Deserialize)]
 pub struct PollInterval {
     pub on: u64,
     pub off: u64,
@@ -59,14 +59,10 @@ pub struct SinkBaseSettings {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
 pub struct SourceBaseSettings {
-    /// Human-readable name of the sink.
+    /// Human-readable name of the source.
     pub name: String,
     /// Whether this source is enabled.
     pub enable: bool,
-    /// The intervals to poll for state changes.
-    pub poll_interval_sec: PollInterval,
-    /// Timeout in seconds.
-    pub timeout_sec: u32,
 }
 
 /// Settings for a sink.
@@ -113,6 +109,9 @@ pub struct MapOfSourceSettings {
     #[cfg(feature = "source-steamlink")]
     #[serde(default)]
     pub steamlink: Box<[crate::source::steamlink::Settings]>,
+    #[cfg(feature = "source-soloist")]
+    #[serde(default)]
+    pub soloist: Box<[crate::source::soloist::Settings]>,
 }
 
 /// App settings.
