@@ -264,6 +264,7 @@ mod tests {
             base: SourceBaseSettings {
                 name: "test".to_string(),
                 enable: true,
+                matrix_only: false,
             },
         }
     }

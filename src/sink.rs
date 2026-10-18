@@ -68,8 +68,8 @@ where
 }
 
 impl SinkBaseSettings {
-    pub fn allows_source_for_on(&self, source_name: &str) -> bool {
-        if let Some(blacklist) = &self.on_source_blacklist {
+    pub fn allows_source(&self, source_name: &str) -> bool {
+        if let Some(blacklist) = &self.source_blacklist {
             for itm in blacklist {
                 if source_name == itm {
                     return false;
@@ -77,7 +77,7 @@ impl SinkBaseSettings {
             }
         }
 
-        if let Some(whitelist) = &self.on_source_whitelist {
+        if let Some(whitelist) = &self.source_whitelist {
             for itm in whitelist {
                 if source_name == itm {
                     return true;

@@ -2,17 +2,14 @@ use crate::sink::Sink;
 use crate::source::Source;
 use config::{Config, File};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 
 /// General settings for the app.
 #[derive(Clone, PartialEq, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct GeneralSettings {
-    /// When on, the interval in seconds that should be checked whether all
-    /// sources are off again or not.
-    pub power_off_check_interval_sec: u64,
-}
+pub struct GeneralSettings {}
 
 /// Interval to poll for source status updates.
 #[derive(Clone, Copy, PartialEq, Debug, Deserialize)]
@@ -31,7 +28,7 @@ pub struct SinkBaseSettings {
     pub name: String,
     /// Whether this sink is enabled.
     pub enable: bool,
-    /// A whitelist for on events of sources that should trigger this sink
+    /// A whitelist for events of sources that should trigger this sink
     /// (`name` field of source).
     ///
     /// If this is set, but `source_blacklist` is not, then only the sources in this whitelist
@@ -39,8 +36,8 @@ pub struct SinkBaseSettings {
     ///
     /// If both are set, then only sources that match both filters will trigger. If neither are
     /// set, all sources will trigger.
-    pub on_source_whitelist: Option<Vec<String>>,
-    /// A blacklist for on events of sources that should NOT trigger this sink
+    pub source_whitelist: Option<Vec<String>>,
+    /// A blacklist for events of sources that should NOT trigger this sink
     /// (`name` field of source).
     ///
     /// If this is set, but `source_whitelist` is not, then all sources except for those in this
@@ -48,9 +45,14 @@ pub struct SinkBaseSettings {
     ///
     /// If both are set, then only sources that match both filters will trigger. If neither are
     /// set, all sources will trigger.
-    pub on_source_blacklist: Option<Vec<String>>,
+    pub source_blacklist: Option<Vec<String>>,
     /// Timeout in seconds.
     pub timeout_sec: u32,
+    #[cfg(feature = "matrix")]
+    /// Which matrix should trigger this sink. If set, no other device will trigger it,
+    /// even if the blacklist or whitelist are set.
+    #[serde(default)]
+    pub matrix: Option<String>,
 }
 
 /// Basic settings for sources. To be used with `#[serde(flatten)]` by
@@ -63,6 +65,21 @@ pub struct SourceBaseSettings {
     pub name: String,
     /// Whether this source is enabled.
     pub enable: bool,
+    #[cfg(feature = "matrix")]
+    /// Do not trigger any devices with this source,
+    /// it can only be used in Matrix expressions.
+    #[serde(default)]
+    pub matrix_only: bool,
+}
+
+#[allow(unreachable_code)]
+impl SourceBaseSettings {
+    pub fn is_matrix_only(&self) -> bool {
+        #[cfg(feature = "matrix")]
+        return self.matrix_only;
+        // else:
+        false
+    }
 }
 
 /// Settings for a sink.
@@ -133,6 +150,9 @@ pub struct Settings {
     pub sink: MapOfSinkSettings,
     #[serde(default)]
     pub source: MapOfSourceSettings,
+    #[cfg(feature = "matrix")]
+    #[serde(default)]
+    pub matrix: HashMap<String, crate::matrix::MatrixDefinition>,
 }
 
 /// Read the [`config.toml`] in the current working directory as the app configuration.

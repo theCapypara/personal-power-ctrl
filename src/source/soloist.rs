@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::sync::watch::{Receiver, Sender};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, warn};
+use tracing::{trace, warn};
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -68,12 +68,12 @@ impl SoloistSource {
             if let Message::Text(text) = msg {
                 let msg = serde_json::from_str::<SoloistMessage>(&text)
                     .with_context(|| format!("error parsing Soloist JSON. raw: {}", text))?;
-                debug!("got a message from Soloist: {:?}", msg);
+                trace!("got a message from Soloist: {:?}", msg);
                 match msg {
                     SoloistMessage::AuthStateMessage { is_active, .. }
                     | SoloistMessage::DeviceChanged { is_active, .. } => tx.send(Ok(is_active))?,
                     SoloistMessage::Unknown => {
-                        debug!("got another kind of message from Soloist: {text}")
+                        trace!("got another kind of message from Soloist: {text}")
                     }
                 }
             } else if msg.is_ping() {

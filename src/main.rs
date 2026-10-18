@@ -10,9 +10,10 @@ use crate::state::State;
 use async_ctrlc::CtrlC;
 use tracing::{error, info};
 
-mod async_util;
 mod identity;
 mod log;
+#[cfg(feature = "matrix")]
+mod matrix;
 mod settings;
 mod sink;
 mod source;
@@ -21,7 +22,11 @@ mod ssh_session;
 mod state;
 
 async fn run(config: Settings) {
-    let mut state = State::new(config.general);
+    let mut state = State::new(
+        config.general,
+        #[cfg(feature = "matrix")]
+        config.matrix,
+    );
     create_sinks(&config.sink, &mut state)
         .await
         .expect("Failed to init sinks.");

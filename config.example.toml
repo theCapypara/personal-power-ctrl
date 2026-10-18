@@ -1,5 +1,4 @@
 [general]
-power-off-check-interval-sec = 1800
 
 [[sink.hs100]]
 name = "Hi-Fi"
@@ -19,7 +18,7 @@ oid = "1.3.6.1.4.1.28507.43.1.3.1.2.1.3.3"
 name = "LibreElec (CEC)"
 enable = true
 timeout-sec = 10
-on-source-whitelist = ["LibreElec"]
+source-whitelist = ["LibreElec"]
 jsonrpc = "http://libreelec.local:8080/jsonrpc"
 user = "kodi"
 pass = "password"
@@ -40,4 +39,4 @@ timeout-sec = 10
 poll-interval-sec = { off = 10, on = 30 }
 host = "steamlink.local:22"
 user = "root"
-pass = "password"
+identity = "id_ed25519"

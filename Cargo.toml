@@ -20,7 +20,7 @@ source-steamlink = ["dep:bidirectional-channel", "ssh"]
 source-soloist = ["dep:tokio-tungstenite", "dep:serde_json"]
 source-timer = ["dep:chrono"]
 source-day-night = ["dep:sunrise", "dep:chrono"]
-matrix = ["dep:logical_expression_parser"]
+matrix = []
 ssh = ["dep:ssh2"]
 
 [dependencies.anyhow]
@@ -101,10 +101,6 @@ version = "0.4"
 [dependencies.sunrise]
 optional = true
 version = "3"
-
-[dependencies.logical_expression_parser]
-optional = true
-version = "0.1"
 
 [dev-dependencies.chrono-tz]
 version = "0.10"

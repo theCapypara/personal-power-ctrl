@@ -1,6 +1,5 @@
 #![allow(clippy::arc_with_non_send_sync)]
 
-use crate::async_util::Wakeup;
 use crate::identity::{Identity, IsSink, IsSource, Named};
 use crate::log::{panic_to_string, pwrst_log};
 use crate::settings::GeneralSettings;
@@ -12,9 +11,10 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::select;
+use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::WatchStream;
@@ -27,6 +27,13 @@ enum PowerState {
     Off,
     #[default]
     Unknown,
+}
+
+impl PowerState {
+    pub fn is_off(&self) -> bool {
+        // Unknown counts as off.
+        matches!(self, Self::Off) || matches!(self, Self::Unknown)
+    }
 }
 
 impl From<bool> for PowerState {
@@ -68,7 +75,7 @@ impl SourceState {
 struct SinkState {
     sink: IsSink,
     current_power_state: AtomicPowerState,
-    should_turn_on: AtomicBool,
+    desired_power_state: AtomicPowerState,
 }
 
 impl SinkState {
@@ -76,23 +83,31 @@ impl SinkState {
         Self {
             sink: IsSink(sink),
             current_power_state: AtomicPowerState::new(PowerState::Unknown),
-            should_turn_on: AtomicBool::new(false),
+            desired_power_state: AtomicPowerState::new(PowerState::Unknown),
         }
     }
 }
 
 pub struct State {
+    #[allow(unused)]
     config: GeneralSettings,
     sources: HashMap<Identity<'static>, SourceState>,
     sinks: Arc<HashMap<Identity<'static>, SinkState>>,
+    #[cfg(feature = "matrix")]
+    matrices: HashMap<String, crate::matrix::MatrixDefinition>,
 }
 
 impl State {
-    pub fn new(config: GeneralSettings) -> Self {
+    pub fn new(
+        config: GeneralSettings,
+        #[cfg(feature = "matrix")] matrices: HashMap<String, crate::matrix::MatrixDefinition>,
+    ) -> Self {
         Self {
             config,
             sources: Default::default(),
             sinks: Arc::new(Default::default()),
+            #[cfg(feature = "matrix")]
+            matrices,
         }
     }
 
@@ -151,9 +166,9 @@ impl State {
     }
 
     pub async fn run(&self) -> ! {
-        let wakeup_sink_check = Arc::new(Wakeup::new(true));
+        let (wakeup_tx, wakeup_rx) = watch::channel(());
         let mut check_sinks = self
-            .check_sinks(wakeup_sink_check.clone())
+            .check_sinks(wakeup_rx)
             .instrument(info_span!("check_sink"))
             .boxed_local()
             .fuse();
@@ -177,17 +192,18 @@ impl State {
                     None => {
                         panic!("source watcher stream ended unexpectedly. Can not continue.");
                     }
-                    Some((identity, new_state)) => self.handle_source_state_change(&wakeup_sink_check, identity, new_state).await
+                    Some((identity, new_state)) => self.handle_source_state_change(&wakeup_tx, identity, new_state).await
                 }
             });
         }
     }
 
-    async fn check_sinks(&self, manual_wakeup: Arc<Wakeup>) {
-        let mut next_poweroff_write_time: Option<Instant> = None;
+    async fn check_sinks(&self, mut manual_wakeup: watch::Receiver<()>) {
+        // Wait 10 seconds for sources to buffer.
+        sleep(Duration::from_secs(10)).await;
 
         loop {
-            let mut wakeup_soon = None;
+            trace!("checking sinks...");
             #[cfg(debug_assertions)]
             {
                 let mut all_info_sources = String::new();
@@ -201,10 +217,10 @@ impl State {
                 let mut all_info_sinks = String::new();
                 for (ident, state) in &*self.sinks {
                     all_info_sinks.push_str(&format!(
-                        "{}: {:?} -> {}\n",
+                        "{}: {:?} -> {:?}\n",
                         ident,
                         state.current_power_state.load(Ordering::Acquire),
-                        state.should_turn_on.load(Ordering::Acquire)
+                        state.desired_power_state.load(Ordering::Acquire)
                     ));
                 }
                 trace!(
@@ -213,101 +229,66 @@ impl State {
             }
             debug!("processing sinks...");
 
-            // Check if all sources are off, if so, turn this one off as well.
-            if self
-                .sources
-                .values()
-                .all(|s| s.current_power_state.load(Ordering::Acquire) != PowerState::On)
-            {
-                debug!("all off or unknown.");
-                let npwt_mut = next_poweroff_write_time.get_or_insert_with(|| {
-                    Instant::now() + Duration::from_secs(self.config.power_off_check_interval_sec)
-                });
-                let wait_time = npwt_mut.duration_since(Instant::now());
-                if wait_time.as_secs() > 0 {
-                    #[cfg(debug_assertions)]
-                    trace!(
-                        "Pending potential poweroff, but next poweroff write scheduled for in {} sec.",
-                        wait_time.as_secs()
-                    );
-                    wakeup_soon = Some(wait_time);
-                } else {
-                    for state in self.sinks.values() {
-                        match state
-                            .current_power_state
-                            .swap(PowerState::Off, Ordering::AcqRel)
-                        {
-                            PowerState::Off => {
-                                #[cfg(debug_assertions)]
-                                trace!("{} Was already turned off.", state.sink.identity())
-                            }
-                            _ => {
-                                info!("{} Turning off...", state.sink.identity());
-                                if !Self::log_sink_error(
-                                    &state.sink,
-                                    AssertUnwindSafe(state.sink.off()).catch_unwind().await,
-                                ) {
-                                    wakeup_soon = Some(Duration::from_secs(5));
-                                    state
-                                        .current_power_state
-                                        .store(PowerState::Unknown, Ordering::Release);
-                                }
-                            }
-                        }
-                    }
+            for state in self.sinks.values() {
+                let desired = state.desired_power_state.load(Ordering::Acquire);
+                let actual = state.current_power_state.load(Ordering::Acquire);
+                if desired == actual {
+                    continue;
                 }
-            } else {
-                debug!("at least one on.");
-                next_poweroff_write_time = None;
-                for state in self.sinks.values() {
-                    // this is not really fully thread safe since the loads and stores are
-                    // detached, but it's fine probably?
-                    let condition = {
-                        state.should_turn_on.load(Ordering::Acquire)
-                            && state.current_power_state.load(Ordering::Acquire) != PowerState::On
-                    };
-                    debug!("{} turn on condition: {}", state.sink.identity(), condition);
-                    if condition {
+                match desired {
+                    PowerState::On => {
                         info!("{} Turning on...", state.sink.identity());
-                        if Self::log_sink_error(
+                        if Self::log_sink_result_is_ok(
                             &state.sink,
                             AssertUnwindSafe(state.sink.on()).catch_unwind().await,
                         ) {
-                            state.should_turn_on.store(false, Ordering::Release);
                             state
                                 .current_power_state
                                 .store(PowerState::On, Ordering::Release);
                         } else {
-                            wakeup_soon = Some(Duration::from_secs(5));
                             state
                                 .current_power_state
                                 .store(PowerState::Unknown, Ordering::Release);
                         }
-                    } else {
-                        #[cfg(debug_assertions)]
-                        trace!(
-                            "{} Was already turned on or should not turn on.",
-                            state.sink.identity()
-                        )
                     }
+                    PowerState::Off => {
+                        info!("{} Turning off...", state.sink.identity());
+                        if Self::log_sink_result_is_ok(
+                            &state.sink,
+                            AssertUnwindSafe(state.sink.off()).catch_unwind().await,
+                        ) {
+                            state
+                                .current_power_state
+                                .store(PowerState::Off, Ordering::Release);
+                        } else {
+                            state
+                                .current_power_state
+                                .store(PowerState::Unknown, Ordering::Release);
+                        }
+                    }
+                    PowerState::Unknown => {}
                 }
             }
 
-            if let Some(wakeup_time) = wakeup_soon {
-                select!(
-                    _ = &*manual_wakeup => {},
-                    _ = sleep(wakeup_time) => {}
-                )
-            } else {
-                (&*manual_wakeup).await;
-            }
+            trace!("waiting for next wakeup");
+            select!(
+                _ = manual_wakeup.changed() => {
+                    trace!("woken up");
+                    manual_wakeup.borrow_and_update();
+                    // If we woke up from a manual wakeup, let's wait 5 seconds, to buffer
+                    sleep(Duration::from_secs(5)).await;
+                },
+                _ = sleep(Duration::from_secs(60)) => {
+                    trace!("a minute passed");
+                }
+            )
         }
     }
 
     #[instrument("check_source_update", skip(self, manual_wakeup))]
     async fn handle_source_state_change(
         &self,
-        manual_wakeup: &Wakeup,
+        manual_wakeup: &watch::Sender<()>,
         identity: Identity<'_>,
         result: SourcePowerStateResult,
     ) {
@@ -322,36 +303,91 @@ impl State {
                     .try_into();
                 if prev_state != Ok(new_state) {
                     info!("{} New power state: {}", identity, pwrst_log(new_state));
-                    self.update_pending_sink_states(&state.source.base_settings().name, new_state)
-                        .await;
+                    self.update_pending_sink_states(state, new_state).await;
                     debug!("waking up sink check");
-                    manual_wakeup.wakeup();
+                    manual_wakeup.send(()).ok();
                 }
             }
             Err(e) => error!("{} Error while getting power state: {}", identity, e.0),
         }
     }
 
-    async fn update_pending_sink_states(&self, source_name: &str, state: bool) {
+    async fn update_pending_sink_states(&self, source: &SourceState, state: bool) {
+        #[cfg(feature = "matrix")]
+        let current_source_states: HashMap<String, bool> = self
+            .sources
+            .iter()
+            .map(|(identity, source)| {
+                (
+                    identity.name().to_string(),
+                    matches!(
+                        source.current_power_state.load(Ordering::Relaxed),
+                        PowerState::On
+                    ),
+                )
+            })
+            .collect();
+
         for sink_state in self.sinks.values() {
-            if sink_state
-                .sink
-                .base_settings()
-                .allows_source_for_on(source_name)
+            #[cfg(feature = "matrix")]
             {
-                if state {
-                    sink_state.should_turn_on.store(true, Ordering::Release);
+                if let Some(matrix_name) = &sink_state.sink.base_settings().matrix
+                    && let Some(matrix) = self.matrices.get(matrix_name)
+                {
+                    let new_state = matrix.eval(&current_source_states);
+                    debug!(
+                        "{} Calculated Matrix result: {}",
+                        sink_state.sink.identity(),
+                        pwrst_log(new_state)
+                    );
+                    sink_state
+                        .desired_power_state
+                        .store(new_state.into(), Ordering::Release);
+                    continue;
                 }
-                debug!(
-                    "{} Marked for new pending power state: {}.",
-                    sink_state.sink.identity(),
-                    pwrst_log(state)
-                );
+
+                if source.source.base_settings().matrix_only {
+                    continue;
+                }
+            }
+
+            let sink_base_settings = sink_state.sink.base_settings();
+            if state {
+                if sink_base_settings.allows_source(&source.source.base_settings().name) {
+                    sink_state
+                        .desired_power_state
+                        .store(PowerState::On, Ordering::Release);
+                    debug!(
+                        "{} Marked for new pending power state: on.",
+                        sink_state.sink.identity(),
+                    );
+                }
+            } else {
+                // Check if all relevant sources are now off
+                let all_off = self
+                    .sources
+                    .values()
+                    .filter(|source| {
+                        let settings = source.source.base_settings();
+
+                        !settings.is_matrix_only()
+                            && sink_base_settings.allows_source(&settings.name)
+                    })
+                    .all(|source| source.current_power_state.load(Ordering::Acquire).is_off());
+                if all_off {
+                    sink_state
+                        .desired_power_state
+                        .store(PowerState::Off, Ordering::Release);
+                    debug!(
+                        "{} Marked for new pending power state: off.",
+                        sink_state.sink.identity(),
+                    );
+                }
             }
         }
     }
 
-    fn log_sink_error(
+    fn log_sink_result_is_ok(
         sink: &impl Named,
         result: Result<Result<(), Box<dyn Error>>, Box<dyn Any + Send>>,
     ) -> bool {
