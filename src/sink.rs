@@ -14,6 +14,8 @@ pub mod kodi_rpc_cec;
 pub mod simple_post_api;
 #[cfg(feature = "sink-snmp")]
 pub mod snmpv2;
+#[cfg(feature = "sink-ssh-generic")]
+pub mod ssh_generic;
 
 #[async_trait]
 /// A device which power state should be controlled based on whether sources are active or not.
@@ -39,6 +41,8 @@ pub async fn create_sinks(
     let all = all.chain(create_of_type(&sink_config.simple_post_api));
     #[cfg(feature = "sink-snmp")]
     let all = all.chain(create_of_type(&sink_config.snmpv2));
+    #[cfg(feature = "sink-ssh-generic")]
+    let all = all.chain(create_of_type(&sink_config.ssh_generic));
 
     state.try_register_sinks(all).await
 }

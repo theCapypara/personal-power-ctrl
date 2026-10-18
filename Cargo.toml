@@ -5,17 +5,25 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [features]
-default = ["sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "sink-snmp", "source-kodi", "source-steamlink", "source-soloist"]
+default = [
+    "sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "sink-snmp", "sink-ssh-generic",
+    "source-kodi", "source-steamlink", "source-soloist", "source-timer", "source-day-night",
+    "matrix"
+]
 sink-hs100 = ["dep:hs100api"]
 sink-kodi-rpc-cec = ["dep:kodi-jsonrpc-client", "dep:reqwest", "dep:serde_json"] # https://github.com/joshjowen/script.json-cec
 sink-simple-post-api = ["dep:reqwest"]
 sink-snmp = ["dep:snmp2"]
+sink-ssh-generic = ["ssh"]
 source-kodi = ["dep:kodi-jsonrpc-client", "dep:reqwest"]
-source-steamlink = ["dep:anyhow", "dep:ssh2", "dep:futures", "dep:bidirectional-channel"]
+source-steamlink = ["dep:bidirectional-channel", "ssh"]
 source-soloist = ["dep:tokio-tungstenite", "dep:serde_json"]
+source-timer = ["dep:chrono"]
+source-day-night = ["dep:sunrise", "dep:chrono"]
+matrix = ["dep:logical_expression_parser"]
+ssh = ["dep:ssh2"]
 
 [dependencies.anyhow]
-optional = true
 version = "1.0"
 
 [dependencies.async-ctrlc]
@@ -35,7 +43,6 @@ version = "0.3"
 version = "0.15"
 
 [dependencies.futures]
-optional = true
 version = "0.3"
 
 [dependencies.hs100api]
@@ -86,3 +93,18 @@ version = "0.3"
 [dependencies.tokio-tungstenite]
 optional = true
 version = "0.30"
+
+[dependencies.chrono]
+optional = true
+version = "0.4"
+
+[dependencies.sunrise]
+optional = true
+version = "3"
+
+[dependencies.logical_expression_parser]
+optional = true
+version = "0.1"
+
+[dev-dependencies.chrono-tz]
+version = "0.10"

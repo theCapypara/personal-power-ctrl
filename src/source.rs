@@ -14,12 +14,16 @@ use tokio::sync::watch;
 use tokio::time::{sleep, timeout};
 use tracing::{Instrument, debug, error, info, info_span};
 
+#[cfg(feature = "source-day-night")]
+pub mod day_night;
 #[cfg(feature = "source-kodi")]
 pub mod kodi;
 #[cfg(feature = "source-soloist")]
 pub mod soloist;
 #[cfg(feature = "source-steamlink")]
 pub mod steamlink;
+#[cfg(feature = "source-timer")]
+pub mod timer;
 
 #[derive(Debug, Clone)]
 #[repr(transparent)]
@@ -120,6 +124,10 @@ pub async fn create_sources(
     let all = all.chain(create_of_type(&source_config.steamlink));
     #[cfg(feature = "source-soloist")]
     let all = all.chain(create_of_type(&source_config.soloist));
+    #[cfg(feature = "source-timer")]
+    let all = all.chain(create_of_type(&source_config.timer));
+    #[cfg(feature = "source-day-night")]
+    let all = all.chain(create_of_type(&source_config.day_night));
 
     state.try_register_sources(all).await
 }

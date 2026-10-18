@@ -16,6 +16,8 @@ mod log;
 mod settings;
 mod sink;
 mod source;
+#[cfg(feature = "ssh")]
+mod ssh_session;
 mod state;
 
 async fn run(config: Settings) {

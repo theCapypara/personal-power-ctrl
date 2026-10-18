@@ -1,16 +1,17 @@
 use crate::log::panic_to_string;
 use crate::settings::{PollInterval, SourceBaseSettings, SourceSettings};
 use crate::source::{PollConfiguration, Source, SourcePowerStateResult};
+use crate::ssh_session::make_ssh_session;
 use anyhow::anyhow;
 use bidirectional_channel::{ReceivedRequest, Requester, Responder, bounded};
 use futures::FutureExt;
 use serde::Deserialize;
-use ssh2::{Channel, Session};
+use ssh2::Channel;
 use std::convert::Infallible;
 use std::error::Error;
 use std::io::Read;
-use std::net::TcpStream;
 use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch::Receiver;
@@ -23,7 +24,7 @@ const MAX_CONNECTION_TRIES: usize = 3;
 pub struct Settings {
     pub host: String,
     pub user: String,
-    pub pass: String,
+    pub identity: PathBuf,
     /// The intervals to poll for state changes.
     pub poll_interval_sec: PollInterval,
     /// Timeout in seconds.
@@ -75,7 +76,7 @@ impl SteamLinkSource {
                             debug!("Steam Link watcher thread receiving.");
 
                             if let Ok(req) = responder.recv().await {
-                                let res_active: Result<bool, anyhow::Error> = Self::make_session(&settings).and_then(|sess| sess.channel_session().map_err(Into::into))
+                                let res_active: Result<bool, anyhow::Error> = make_ssh_session(settings.timeout_sec as _, &settings.host, &settings.user, &settings.identity).and_then(|sess| sess.channel_session().map_err(Into::into))
                                     .and_then(Self::check_active);
 
                                 debug!("Steam Link watcher thread result: {:?}", res_active);
@@ -135,21 +136,6 @@ impl SteamLinkSource {
                 };
             }
         });
-    }
-
-    fn make_session(settings: &Settings) -> Result<Session, anyhow::Error> {
-        let tcp = TcpStream::connect(&settings.host)?;
-        let mut sess = Session::new()?;
-        sess.set_tcp_stream(tcp);
-        sess.handshake()?;
-        sess.userauth_password(&settings.user, &settings.pass)?;
-        if sess.authenticated() {
-            Ok(sess)
-        } else {
-            Err(anyhow!(
-                "Failed to authenticate with Steam Link via SSH via password."
-            ))
-        }
     }
 
     fn check_active(mut channel: Channel) -> Result<bool, anyhow::Error> {

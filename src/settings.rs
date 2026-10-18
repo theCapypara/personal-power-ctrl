@@ -96,6 +96,9 @@ pub struct MapOfSinkSettings {
     #[cfg(feature = "sink-snmp")]
     #[serde(default)]
     pub snmpv2: Box<[crate::sink::snmpv2::Settings]>,
+    #[cfg(feature = "sink-ssh-generic")]
+    #[serde(default)]
+    pub ssh_generic: Box<[crate::sink::ssh_generic::Settings]>,
 }
 
 /// Mapping of all available sources by type.
@@ -112,6 +115,12 @@ pub struct MapOfSourceSettings {
     #[cfg(feature = "source-soloist")]
     #[serde(default)]
     pub soloist: Box<[crate::source::soloist::Settings]>,
+    #[cfg(feature = "source-timer")]
+    #[serde(default)]
+    pub timer: Box<[crate::source::timer::Settings]>,
+    #[cfg(feature = "source-day-night")]
+    #[serde(default)]
+    pub day_night: Box<[crate::source::day_night::Settings]>,
 }
 
 /// App settings.
