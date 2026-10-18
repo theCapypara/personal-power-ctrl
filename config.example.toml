@@ -23,6 +23,15 @@ jsonrpc = "http://libreelec.local:8080/jsonrpc"
 user = "kodi"
 pass = "password"
 
+[[sink.hs100]]
+name = "Lamp"
+enable = true
+timeout-sec = 10
+host = "foo.local:9999"
+matrix = "day-night"
+
+# ----
+
 [[source.kodi]]
 name = "LibreElec"
 enable = true
@@ -40,3 +49,38 @@ poll-interval-sec = { off = 10, on = 30 }
 host = "steamlink.local:22"
 user = "root"
 identity = "id_ed25519"
+
+[[source.timer]]
+name = "Awake"
+enable = true
+start = {
+    mon = "05:00",
+    tue = "05:00",
+    wed = "05:00",
+    thu = "05:00",
+    fri = "05:00",
+    sat = "08:00",
+    sun = "08:00"
+}
+end = {
+    mon = "23:30",
+    tue = "23:23",
+    wed = "23:23",
+    thu = "23:23",
+    fri = "23:23",
+    sat = "nextday@01:30",
+    sun = "nextday@01:30"
+}
+matrix-only = true
+
+[[source.day-night]]
+name = "Sunlight"
+enable = true
+pos = { lat = 53.75396, lon = 9.65339 }
+matrix-only = true
+
+# ------------------------------
+
+[matrix.day-night]
+# When it's dark outside, but not the middle of the night when nobody is awake
+trigger = "!'Sunlight' && 'Awake'"
