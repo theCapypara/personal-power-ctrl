@@ -104,3 +104,7 @@ version = "3"
 
 [dev-dependencies.chrono-tz]
 version = "0.10"
+
+[[example]]
+name = "sunrise"
+required-features = ["source-day-night"]

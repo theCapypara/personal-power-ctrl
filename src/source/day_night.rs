@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
-use sunrise::{Coordinates, DawnType, SolarDay, SolarEvent};
+use sunrise::{Coordinates, SolarDay, SolarEvent};
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver;
 use tokio::time::sleep;
@@ -105,7 +105,14 @@ impl Source for DayNightSource {
     }
 }
 
-/// Whether it is day (between civil dawn and civil dusk) at `now`, and the next point in time
+impl DayNightSource {
+    #[allow(unused)]
+    pub fn state_at<Tz: TimeZone>(&self, time: DateTime<Tz>) -> (bool, DateTime<Tz>) {
+        state_at(self.coords, &time)
+    }
+}
+
+/// Whether it is day (between sunrise and sunset) at `now`, and the next point in time
 /// at which that changes.
 ///
 /// Events of the surrounding days are considered, since the local date of `now` doesn't need to
@@ -135,7 +142,7 @@ fn state_at<Tz: TimeZone>(coords: Coordinates, now: &DateTime<Tz>) -> (bool, Dat
 
 /// Events of the given date, as pairs of the point in time and whether it is day from then on.
 ///
-/// If civil dawn and dusk don't happen (polar day or night), the whole date is treated as day or
+/// If sunrise and sunset don't happen (polar day or night), the whole date is treated as day or
 /// night respectively.
 fn day_events<Tz: TimeZone>(
     coords: Coordinates,
@@ -143,12 +150,12 @@ fn day_events<Tz: TimeZone>(
     tz: &Tz,
 ) -> Vec<(DateTime<Tz>, bool)> {
     let solar_day = SolarDay::new(coords, date);
-    let dawn = solar_day.event_time(SolarEvent::Dawn(DawnType::Civil));
-    let dusk = solar_day.event_time(SolarEvent::Dusk(DawnType::Civil));
-    match (dawn, dusk) {
-        (Some(dawn), Some(dusk)) => vec![
-            (dawn.with_timezone(tz), true),
-            (dusk.with_timezone(tz), false),
+    let sunrise = solar_day.event_time(SolarEvent::Sunrise);
+    let sunset = solar_day.event_time(SolarEvent::Sunset);
+    match (sunrise, sunset) {
+        (Some(sunrise), Some(sunset)) => vec![
+            (sunrise.with_timezone(tz), true),
+            (sunset.with_timezone(tz), false),
         ],
         _ => vec![(start_of(date, tz), is_polar_day(coords, date))],
     }
@@ -210,31 +217,35 @@ mod tests {
     #[test]
     fn winter_day_in_hamburg() {
         let c = coords(HAMBURG);
-        // Civil dawn is around 07:50 and civil dusk around 16:45.
-        let (day, dawn) = state_at(c, &at(2026, 12, 21, 5, 0));
+        // Sunrise is around 08:35 and sunset around 16:00.
+        let (day, sunrise) = state_at(c, &at(2026, 12, 21, 5, 0));
         assert!(!day, "early morning must be night");
-        assert_between(&dawn, at(2026, 12, 21, 7, 30), at(2026, 12, 21, 8, 15));
+        assert_between(&sunrise, at(2026, 12, 21, 8, 15), at(2026, 12, 21, 8, 55));
 
-        let (day, dusk) = state_at(c, &at(2026, 12, 21, 12, 0));
+        let (day, sunset) = state_at(c, &at(2026, 12, 21, 12, 0));
         assert!(day, "noon must be day");
-        assert_between(&dusk, at(2026, 12, 21, 16, 15), at(2026, 12, 21, 17, 0));
+        assert_between(&sunset, at(2026, 12, 21, 15, 40), at(2026, 12, 21, 16, 20));
 
-        let (day, next_dawn) = state_at(c, &at(2026, 12, 21, 20, 0));
+        let (day, next_sunrise) = state_at(c, &at(2026, 12, 21, 20, 0));
         assert!(!day, "evening must be night");
-        assert_between(&next_dawn, at(2026, 12, 22, 7, 30), at(2026, 12, 22, 8, 15));
+        assert_between(
+            &next_sunrise,
+            at(2026, 12, 22, 8, 15),
+            at(2026, 12, 22, 8, 55),
+        );
     }
 
     #[test]
     fn summer_day_in_hamburg() {
         let c = coords(HAMBURG);
-        // Civil dawn is around 04:10 and civil dusk around 22:45 (CEST).
-        let (day, dawn) = state_at(c, &at(2026, 6, 21, 1, 0));
+        // Sunrise is around 04:50 and sunset around 21:55 (CEST).
+        let (day, sunrise) = state_at(c, &at(2026, 6, 21, 1, 0));
         assert!(!day);
-        assert_between(&dawn, at(2026, 6, 21, 3, 45), at(2026, 6, 21, 4, 30));
+        assert_between(&sunrise, at(2026, 6, 21, 4, 30), at(2026, 6, 21, 5, 10));
 
-        let (day, dusk) = state_at(c, &at(2026, 6, 21, 21, 0));
+        let (day, sunset) = state_at(c, &at(2026, 6, 21, 21, 0));
         assert!(day);
-        assert_between(&dusk, at(2026, 6, 21, 22, 30), at(2026, 6, 21, 23, 15));
+        assert_between(&sunset, at(2026, 6, 21, 21, 35), at(2026, 6, 21, 22, 15));
     }
 
     #[test]
@@ -283,19 +294,19 @@ mod tests {
         // 12:00 in Sydney is 02:00 in Berlin during the European winter.
         assert!(state_at(c, &at(2026, 12, 21, 2, 0)).0);
         assert!(!state_at(c, &at(2026, 12, 21, 14, 0)).0);
-        // 06:00 on the next day in Sydney, after dawn, while it's still the 21st in Berlin.
+        // 06:00 on the next day in Sydney, after sunrise, while it's still the 21st in Berlin.
         let now = at(2026, 12, 21, 20, 0);
         let (day, next) = state_at(c, &now);
         assert!(day);
         assert!(next > now);
-        // Civil dusk is around 20:30 in Sydney.
-        assert_between(&next, at(2026, 12, 22, 10, 0), at(2026, 12, 22, 11, 0));
+        // Sunset is around 20:05 in Sydney.
+        assert_between(&next, at(2026, 12, 22, 9, 45), at(2026, 12, 22, 10, 25));
 
         let sydney = chrono_tz::Australia::Sydney;
-        let (day, dawn) = state_at(c, &sydney.with_ymd_and_hms(2026, 12, 21, 3, 0, 0).unwrap());
+        let (day, sunrise) = state_at(c, &sydney.with_ymd_and_hms(2026, 12, 21, 3, 0, 0).unwrap());
         assert!(!day);
         assert_between(
-            &dawn.with_timezone(&Berlin),
+            &sunrise.with_timezone(&Berlin),
             at(2026, 12, 20, 19, 0),
             at(2026, 12, 20, 20, 0),
         );
