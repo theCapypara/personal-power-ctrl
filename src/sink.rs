@@ -6,6 +6,8 @@ use std::iter::empty;
 use std::sync::Arc;
 use tracing::{error, info};
 
+#[cfg(feature = "sink-banlanx-led-controller")]
+pub mod banlanx_led_controller;
 #[cfg(feature = "sink-hs100")]
 pub mod hs100;
 #[cfg(feature = "sink-kodi-rpc-cec")]
@@ -43,6 +45,8 @@ pub async fn create_sinks(
     let all = all.chain(create_of_type(&sink_config.snmpv2));
     #[cfg(feature = "sink-ssh-generic")]
     let all = all.chain(create_of_type(&sink_config.ssh_generic));
+    #[cfg(feature = "sink-banlanx-led-controller")]
+    let all = all.chain(create_of_type(&sink_config.banlanx_led_controller));
 
     state.try_register_sinks(all).await
 }

@@ -6,7 +6,7 @@ license = "GPL-3.0-or-later"
 
 [features]
 default = [
-    "sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "sink-snmp", "sink-ssh-generic",
+    "sink-hs100", "sink-kodi-rpc-cec", "sink-simple-post-api", "sink-snmp", "sink-ssh-generic", "sink-banlanx-led-controller",
     "source-kodi", "source-steamlink", "source-soloist", "source-timer", "source-day-night",
     "matrix"
 ]
@@ -15,6 +15,7 @@ sink-kodi-rpc-cec = ["dep:kodi-jsonrpc-client", "dep:reqwest", "dep:serde_json"]
 sink-simple-post-api = ["dep:reqwest"]
 sink-snmp = ["dep:snmp2"]
 sink-ssh-generic = ["ssh"]
+sink-banlanx-led-controller = ["dep:banlanx-led-controller"]
 source-kodi = ["dep:kodi-jsonrpc-client", "dep:reqwest"]
 source-steamlink = ["dep:bidirectional-channel", "ssh"]
 source-soloist = ["dep:tokio-tungstenite", "dep:serde_json"]
@@ -101,6 +102,11 @@ version = "0.4"
 [dependencies.sunrise]
 optional = true
 version = "3"
+
+[dependencies.banlanx-led-controller]
+optional = true
+git = "https://github.com/theCapypara/banlanx-led-controller.git"
+rev = "3ad9fb06f339ce4e02513cbf44c6e63dc9ad4d62"
 
 [dev-dependencies.chrono-tz]
 version = "0.10"

@@ -116,6 +116,9 @@ pub struct MapOfSinkSettings {
     #[cfg(feature = "sink-ssh-generic")]
     #[serde(default)]
     pub ssh_generic: Box<[crate::sink::ssh_generic::Settings]>,
+    #[cfg(feature = "sink-banlanx-led-controller")]
+    #[serde(default)]
+    pub banlanx_led_controller: Box<[crate::sink::banlanx_led_controller::Settings]>,
 }
 
 /// Mapping of all available sources by type.
