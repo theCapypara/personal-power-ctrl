@@ -166,7 +166,7 @@ impl State {
     }
 
     pub async fn run(&self) -> ! {
-        let (wakeup_tx, wakeup_rx) = watch::channel(());
+        let (wakeup_tx, wakeup_rx) = watch::channel(false);
         let mut check_sinks = self
             .check_sinks(wakeup_rx)
             .instrument(info_span!("check_sink"))
@@ -198,7 +198,7 @@ impl State {
         }
     }
 
-    async fn check_sinks(&self, mut manual_wakeup: watch::Receiver<()>) {
+    async fn check_sinks(&self, mut manual_wakeup: watch::Receiver<bool>) {
         // Wait 10 seconds for sources to buffer.
         sleep(Duration::from_secs(10)).await;
 
@@ -274,9 +274,12 @@ impl State {
             select!(
                 _ = manual_wakeup.changed() => {
                     trace!("woken up");
-                    manual_wakeup.borrow_and_update();
-                    // If we woke up from a manual wakeup, let's wait 5 seconds, to buffer
-                    sleep(Duration::from_secs(5)).await;
+                    let only_turned_on = manual_wakeup.borrow_and_update();
+                    if !*only_turned_on {
+                        // If we woke up from a manual wakeup and sinks potentially turned off,
+                        // let's wait 5 seconds, to buffer
+                        sleep(Duration::from_secs(5)).await;
+                    }
                 },
                 _ = sleep(Duration::from_secs(60)) => {
                     trace!("a minute passed");
@@ -288,7 +291,7 @@ impl State {
     #[instrument("check_source_update", skip(self, manual_wakeup))]
     async fn handle_source_state_change(
         &self,
-        manual_wakeup: &watch::Sender<()>,
+        manual_wakeup: &watch::Sender<bool>,
         identity: Identity<'_>,
         result: SourcePowerStateResult,
     ) {
@@ -303,16 +306,18 @@ impl State {
                     .try_into();
                 if prev_state != Ok(new_state) {
                     info!("{} New power state: {}", identity, pwrst_log(new_state));
-                    self.update_pending_sink_states(state, new_state).await;
+                    let only_turned_on = self.update_pending_sink_states(state, new_state).await;
                     debug!("waking up sink check");
-                    manual_wakeup.send(()).ok();
+                    manual_wakeup.send(only_turned_on).ok();
                 }
             }
             Err(e) => error!("{} Error while getting power state: {}", identity, e.0),
         }
     }
 
-    async fn update_pending_sink_states(&self, source: &SourceState, state: bool) {
+    /// Updates the pending sink states, returns `true` if all actions lead to sinks being turned
+    /// on or no update occured and `false` if any sink was turned off.
+    async fn update_pending_sink_states(&self, source: &SourceState, state: bool) -> bool {
         #[cfg(feature = "matrix")]
         let current_source_states: HashMap<String, bool> = self
             .sources
@@ -328,6 +333,8 @@ impl State {
             })
             .collect();
 
+        let mut only_turned_on = true;
+
         for sink_state in self.sinks.values() {
             #[cfg(feature = "matrix")]
             {
@@ -340,6 +347,7 @@ impl State {
                         sink_state.sink.identity(),
                         pwrst_log(new_state)
                     );
+                    only_turned_on &= new_state;
                     sink_state
                         .desired_power_state
                         .store(new_state.into(), Ordering::Release);
@@ -378,6 +386,7 @@ impl State {
                     sink_state
                         .desired_power_state
                         .store(PowerState::Off, Ordering::Release);
+                    only_turned_on = false;
                     debug!(
                         "{} Marked for new pending power state: off.",
                         sink_state.sink.identity(),
@@ -385,6 +394,7 @@ impl State {
                 }
             }
         }
+        only_turned_on
     }
 
     fn log_sink_result_is_ok(
