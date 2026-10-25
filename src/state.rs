@@ -347,10 +347,13 @@ impl State {
                         sink_state.sink.identity(),
                         pwrst_log(new_state)
                     );
-                    only_turned_on &= new_state;
+                    let new_state_obj: PowerState = new_state.into();
+                    if sink_state.current_power_state.load(Ordering::Acquire) != new_state_obj {
+                        only_turned_on &= new_state;
+                    }
                     sink_state
                         .desired_power_state
-                        .store(new_state.into(), Ordering::Release);
+                        .store(new_state_obj, Ordering::Release);
                     continue;
                 }
 
@@ -386,7 +389,13 @@ impl State {
                     sink_state
                         .desired_power_state
                         .store(PowerState::Off, Ordering::Release);
-                    only_turned_on = false;
+                    if !sink_state
+                        .current_power_state
+                        .load(Ordering::Acquire)
+                        .is_off()
+                    {
+                        only_turned_on = false;
+                    }
                     debug!(
                         "{} Marked for new pending power state: off.",
                         sink_state.sink.identity(),
